@@ -1,0 +1,29 @@
+# PricePilot - Dependencies
+# Install with: pip install -r requirements.txt
+
+# Dashboard
+streamlit>=1.32.0
+
+# Data & Analytics
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Charts
+plotly>=5.18.0
+
+# Regression in scatter trendline (usata in analytics tab)
+statsmodels>=0.14.0
+
+# API REST (opzionale – solo se si usa pricepilot/api/server.py)
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.0.0
+
+# (Opzionale) Jupyter per analisi ad-hoc
+# notebook>=7.0.0
+
+# Autenticazione opzionale.
+# Nota: su Python 3.14/Windows le versioni recenti di supabase possono richiedere
+# build tools C++ tramite dipendenze transitive. La dashboard funziona in dev mode
+# senza Supabase; riabilitare quando fissiamo runtime/auth di produzione.
+# supabase>=2.0.0
