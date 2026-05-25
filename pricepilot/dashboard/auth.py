@@ -14,6 +14,7 @@ import secrets
 from datetime import datetime
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from pricepilot.core.database import (
     create_account,
@@ -460,6 +461,19 @@ def _inject_public_css():
     .pp-log-item:last-child { border-bottom:0; }
     .pp-log-item b { display:block; color:#ffffff; font-size:.78rem; margin-bottom:2px; }
 
+    .pp-auth-wrap { min-height:calc(100vh - 128px) !important; padding:16px 0 24px !important;
+      display:flex !important; align-items:center !important; justify-content:center !important; }
+    .pp-auth-card { width:100% !important; max-width:500px !important; margin:0 auto !important;
+      background:#ffffff !important; border:1px solid rgba(0,0,0,.10) !important; border-radius:20px !important;
+      padding:28px !important; box-shadow:0 24px 70px rgba(0,0,0,.08) !important; }
+    .pp-auth-title { color:#000000 !important; font-size:1.55rem !important; letter-spacing:-.025em !important; }
+    .pp-auth-copy { color:rgba(0,0,0,.58) !important; }
+    .pp-plan-pill { background:#ffffff !important; color:#B5523A !important; border:1px solid rgba(181,82,58,.24) !important; }
+    .pp-auth-top-gap { height:clamp(10px, 7vh, 58px); }
+    div[data-testid="stVerticalBlockBorderWrapper"] { border:1px solid rgba(0,0,0,.10) !important;
+      border-radius:20px !important; background:#ffffff !important; box-shadow:0 24px 70px rgba(0,0,0,.08) !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div { border-radius:20px !important; }
+
     @media (max-width: 900px) {
       .pp-enterprise-hero { padding:44px 0 28px !important; }
       .pp-enterprise-hero h1 { font-size:3rem !important; line-height:1 !important; }
@@ -468,6 +482,11 @@ def _inject_public_css():
       .pp-logo-wall { grid-template-columns:repeat(2,minmax(0,1fr)); }
       .pp-section { padding:52px 0 !important; }
       .pp-feature-row { padding:54px 0 !important; }
+      .block-container { padding-top:.7rem !important; }
+      .pp-auth-top-gap { height:6px; }
+      .pp-auth-wrap { min-height:auto !important; padding:8px 0 20px !important; align-items:flex-start !important; }
+      .pp-auth-card { max-width:100% !important; padding:22px 18px !important; border-radius:16px !important; box-shadow:0 16px 48px rgba(0,0,0,.07) !important; }
+      div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:16px !important; box-shadow:0 16px 48px rgba(0,0,0,.07) !important; }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -512,16 +531,8 @@ def _render_landing_page():
             '</section>',
             unsafe_allow_html=True,
         )
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            if st.button("Inizia Gratis", key="hero_start_free", use_container_width=True, type="primary"):
-                _go_public("register", "free")
-        with c2:
-            if st.button("Guarda Demo", key="hero_demo", use_container_width=True):
-                st.session_state["pp_show_demo_note"] = True
-                st.rerun()
-        if st.session_state.get("pp_show_demo_note"):
-            st.info("La demo mostra il flusso operativo: mercato, calendario, analytics e approvazione Telegram.")
+        if st.button("Inizia Gratis", key="hero_start_free", use_container_width=True, type="primary"):
+            _go_public("register", "free")
         st.markdown(
             '<div class="pp-proof-row">'
             '<span class="pp-proof"><strong>6h</strong> market refresh</span>'
@@ -1090,66 +1101,90 @@ def _render_final_cta_section():
             _go_public("register", "free")
 
 
+def _reset_auth_scroll():
+    components.html(
+        """
+        <script>
+        (() => {
+          try {
+            const w = window.parent || window;
+            const cleanUrl = w.location.pathname + w.location.search;
+            if (w.location.hash) {
+              w.history.replaceState(null, "", cleanUrl);
+            }
+            w.scrollTo({ top: 0, left: 0, behavior: "instant" });
+            setTimeout(() => w.scrollTo(0, 0), 40);
+            setTimeout(() => w.scrollTo(0, 0), 160);
+          } catch (error) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _render_auth_panel(client, view: str):
+    _reset_auth_scroll()
+
     if st.button("Torna alla home", key="auth_back_home"):
         _go_public("landing")
 
+    st.markdown('<div class="pp-auth-top-gap"></div>', unsafe_allow_html=True)
     _, col, _ = st.columns([1, 1.25, 1])
     with col:
         plan = _selected_plan()
-        st.markdown('<div class="pp-auth-wrap"><div class="pp-auth-card">', unsafe_allow_html=True)
-        st.markdown(
-            f'<span class="pp-plan-pill">Piano scelto: {get_plan(plan)["label"]}</span>'
-            f'<div class="pp-auth-title">{_auth_title(view)}</div>'
-            f'<div class="pp-auth-copy">{_auth_copy(view)}</div>',
-            unsafe_allow_html=True,
-        )
-
-        if view == "login":
-            login_email = st.text_input("Email", key="auth_login_email", placeholder="mario@esempio.it")
-            login_pw = st.text_input("Password", key="auth_login_pw", type="password", placeholder="Password")
-            if st.button("Accedi", key="auth_login_btn", use_container_width=True, type="primary"):
-                _do_login(client, login_email, login_pw)
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Crea account", key="auth_to_register", use_container_width=True):
-                    _go_public("register")
-            with c2:
-                if st.button("Password dimenticata", key="auth_to_forgot", use_container_width=True):
-                    _go_public("forgot")
-
-        elif view == "forgot":
-            reset_email = st.text_input("Email", key="auth_forgot_email", placeholder="mario@esempio.it")
-            if st.button("Invia link di recupero", key="auth_forgot_btn", use_container_width=True, type="primary"):
-                _do_password_reset(client, reset_email)
-            if st.button("Torna al login", key="forgot_to_login", use_container_width=True):
-                _go_public("login")
-
-        else:
-            signup_email = st.text_input("Email", key="auth_signup_email", placeholder="mario@esempio.it")
-            signup_name = st.text_input("Nome attivita", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
-            selected_plan = st.selectbox(
-                "Piano scelto",
-                list(PLAN_ORDER),
-                index=list(PLAN_ORDER).index(plan),
-                format_func=lambda p: get_plan(p)["label"],
-                key="auth_signup_plan",
+        with st.container(border=True, key=f"pp_auth_card_{view}"):
+            st.markdown(
+                f'<span class="pp-plan-pill">Piano scelto: {get_plan(plan)["label"]}</span>'
+                f'<div class="pp-auth-title">{_auth_title(view)}</div>'
+                f'<div class="pp-auth-copy">{_auth_copy(view)}</div>',
+                unsafe_allow_html=True,
             )
-            st.session_state[_KEY_SELECTED_PLAN] = selected_plan
-            signup_pw = st.text_input(
-                "Password",
-                key="auth_signup_pw",
-                type="password",
-                placeholder="Minimo 6 caratteri",
-            )
-            if st.button("Crea account", key="auth_signup_btn", use_container_width=True, type="primary"):
-                _do_signup(client, signup_email, signup_pw, signup_name, selected_plan)
-            if st.button("Hai gia un account? Accedi", key="register_to_login", use_container_width=True):
-                _go_public("login")
 
-        auth_label = "Supabase" if client else "locale"
-        st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
-        st.markdown("</div></div>", unsafe_allow_html=True)
+            if view == "login":
+                login_email = st.text_input("Email", key="auth_login_email", placeholder="mario@esempio.it")
+                login_pw = st.text_input("Password", key="auth_login_pw", type="password", placeholder="Password")
+                if st.button("Accedi", key="auth_login_btn", use_container_width=True, type="primary"):
+                    _do_login(client, login_email, login_pw)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Crea account", key="auth_to_register", use_container_width=True):
+                        _go_public("register")
+                with c2:
+                    if st.button("Password dimenticata", key="auth_to_forgot", use_container_width=True):
+                        _go_public("forgot")
+
+            elif view == "forgot":
+                reset_email = st.text_input("Email", key="auth_forgot_email", placeholder="mario@esempio.it")
+                if st.button("Invia link di recupero", key="auth_forgot_btn", use_container_width=True, type="primary"):
+                    _do_password_reset(client, reset_email)
+                if st.button("Torna al login", key="forgot_to_login", use_container_width=True):
+                    _go_public("login")
+
+            else:
+                signup_email = st.text_input("Email", key="auth_signup_email", placeholder="mario@esempio.it")
+                signup_name = st.text_input("Nome attivita", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
+                selected_plan = st.selectbox(
+                    "Piano scelto",
+                    list(PLAN_ORDER),
+                    index=list(PLAN_ORDER).index(plan),
+                    format_func=lambda p: get_plan(p)["label"],
+                    key="auth_signup_plan",
+                )
+                st.session_state[_KEY_SELECTED_PLAN] = selected_plan
+                signup_pw = st.text_input(
+                    "Password",
+                    key="auth_signup_pw",
+                    type="password",
+                    placeholder="Minimo 6 caratteri",
+                )
+                if st.button("Crea account", key="auth_signup_btn", use_container_width=True, type="primary"):
+                    _do_signup(client, signup_email, signup_pw, signup_name, selected_plan)
+                if st.button("Hai gia un account? Accedi", key="register_to_login", use_container_width=True):
+                    _go_public("login")
+
+            auth_label = "Supabase" if client else "locale"
+            st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
 
 
 def _auth_title(view: str) -> str:
