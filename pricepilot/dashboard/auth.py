@@ -469,7 +469,7 @@ def _inject_public_css():
     .pp-auth-title { color:#000000 !important; font-size:1.55rem !important; letter-spacing:-.025em !important; }
     .pp-auth-copy { color:rgba(0,0,0,.58) !important; }
     .pp-plan-pill { background:#ffffff !important; color:#B5523A !important; border:1px solid rgba(181,82,58,.24) !important; }
-    .pp-auth-top-gap { height:clamp(10px, 7vh, 58px); }
+    .pp-auth-top-gap { height:0; }
     div[data-testid="stVerticalBlockBorderWrapper"] { border:1px solid rgba(0,0,0,.10) !important;
       border-radius:20px !important; background:#ffffff !important; box-shadow:0 24px 70px rgba(0,0,0,.08) !important; }
     div[data-testid="stVerticalBlockBorderWrapper"] > div { border-radius:20px !important; }
@@ -483,7 +483,7 @@ def _inject_public_css():
       .pp-section { padding:52px 0 !important; }
       .pp-feature-row { padding:54px 0 !important; }
       .block-container { padding-top:.7rem !important; }
-      .pp-auth-top-gap { height:6px; }
+      .pp-auth-top-gap { height:0; }
       .pp-auth-wrap { min-height:auto !important; padding:8px 0 20px !important; align-items:flex-start !important; }
       .pp-auth-card { max-width:100% !important; padding:22px 18px !important; border-radius:16px !important; box-shadow:0 16px 48px rgba(0,0,0,.07) !important; }
       div[data-testid="stVerticalBlockBorderWrapper"] { border-radius:16px !important; box-shadow:0 16px 48px rgba(0,0,0,.07) !important; }
@@ -1126,10 +1126,6 @@ def _reset_auth_scroll():
 def _render_auth_panel(client, view: str):
     _reset_auth_scroll()
 
-    if st.button("Torna alla home", key="auth_back_home"):
-        _go_public("landing")
-
-    st.markdown('<div class="pp-auth-top-gap"></div>', unsafe_allow_html=True)
     _, col, _ = st.columns([1, 1.25, 1])
     with col:
         plan = _selected_plan()
@@ -1185,6 +1181,8 @@ def _render_auth_panel(client, view: str):
 
             auth_label = "Supabase" if client else "locale"
             st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
+            if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
+                _go_public("landing")
 
 
 def _auth_title(view: str) -> str:
