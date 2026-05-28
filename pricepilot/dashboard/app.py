@@ -130,6 +130,12 @@ def reset_account_scoped_state_if_needed():
             st.session_state.pop(key, None)
 
 
+def _sync_active_property_from_sidebar() -> None:
+    selected_id = st.session_state.get("sidebar_prop_sel")
+    if selected_id:
+        st.session_state["active_prop_id"] = selected_id
+
+
 def reset_property_pricing_widget_state(
     prop_id: int | str | None,
     *,
@@ -152,7 +158,9 @@ def reset_property_pricing_widget_state(
             f"ps_max_{prop_id}",
         ])
     for key in keys:
-        st.session_state.pop(key, None)
+        for state_key in list(st.session_state.keys()):
+            if state_key == key or str(state_key).startswith(f"{key}_"):
+                st.session_state.pop(state_key, None)
 
 
 def queue_property_pricing_widget_reset(
@@ -213,6 +221,16 @@ def _price_limit_state_keys(prop_id: int | str) -> tuple[str, str, str]:
     )
 
 
+def _remember_saved_price_limits(prop_id: int | str, min_price: float, max_price: float) -> None:
+    """Allinea la cache UI ai limiti salvati della proprieta."""
+    min_value = float(min_price)
+    max_value = float(max_price)
+    min_key, max_key, saved_key = _price_limit_state_keys(prop_id)
+    st.session_state[min_key] = min_value
+    st.session_state[max_key] = max_value
+    st.session_state[saved_key] = (min_value, max_value)
+
+
 def get_synced_price_limits(prop: dict | None, cfg: dict | None = None) -> tuple[float, float]:
     """Ritorna i limiti prezzo condivisi tra sidebar e tab Prezzi."""
     cfg = cfg or {}
@@ -237,6 +255,18 @@ def get_synced_price_limits(prop: dict | None, cfg: dict | None = None) -> tuple
         st.session_state.setdefault(max_key, saved_max)
 
     return float(st.session_state[min_key]), float(st.session_state[max_key])
+
+
+def _price_limit_widget_suffix(prop: dict | None, cfg: dict | None = None) -> str:
+    """Versione stabile dei widget min/max: cambia solo dopo un salvataggio reale."""
+    if not prop:
+        return "global"
+    min_value, max_value = get_synced_price_limits(prop, cfg)
+    return (
+        f"{prop['id']}_"
+        f"{int(round(float(min_value) * 100))}_"
+        f"{int(round(float(max_value) * 100))}"
+    )
 
 
 def save_synced_price_limits(
@@ -271,10 +301,7 @@ def save_synced_price_limits(
         **({"strategy": strategy} if strategy is not None else {}),
     })
 
-    min_key, max_key, saved_key = _price_limit_state_keys(prop_id)
-    st.session_state[min_key] = min_value
-    st.session_state[max_key] = max_value
-    st.session_state[saved_key] = (min_value, max_value)
+    _remember_saved_price_limits(prop_id, min_value, max_value)
     st.session_state["active_prop_id"] = prop_id
     if updated_prop:
         sync_property_pricing_rules(
@@ -989,6 +1016,8 @@ def render_sidebar():
             default_id   = st.session_state.get("active_prop_id", props[0]["id"])
             if default_id not in prop_options:
                 default_id = props[0]["id"]
+            if st.session_state.get("sidebar_prop_sel") != default_id:
+                st.session_state["sidebar_prop_sel"] = default_id
 
             active_id = st.selectbox(
                 "Seleziona proprietà",
@@ -996,6 +1025,7 @@ def render_sidebar():
                 format_func=lambda x: prop_options[x],
                 index=list(prop_options.keys()).index(default_id),
                 key="sidebar_prop_sel",
+                on_change=_sync_active_property_from_sidebar,
                 label_visibility="collapsed",
             )
             st.session_state["active_prop_id"] = active_id
@@ -1083,12 +1113,13 @@ def render_sidebar():
             _sidebar_flash = st.session_state.pop("pp_sidebar_price_flash_global", None)
         if _sidebar_flash:
             st.success(_sidebar_flash)
+        sidebar_price_key_suffix = _price_limit_widget_suffix(active_prop, cfg)
         col1, col2 = st.columns(2)
         with col1:
             min_price = st.number_input(
                 "Min (€)", min_value=10.0, max_value=9990.0,
                 value=sidebar_min_value, step=5.0,
-                key=f"sidebar_min_price_{active_prop['id'] if active_prop else 'global'}",
+                key=f"sidebar_min_price_{sidebar_price_key_suffix}",
                 help=(
                     "Prezzo minimo assoluto per notte. "
                     "PricePilot non scenderà mai sotto questa soglia. "
@@ -1099,7 +1130,7 @@ def render_sidebar():
             max_price = st.number_input(
                 "Max (€)", min_value=50.0, max_value=9999.0,
                 value=sidebar_max_value, step=10.0,
-                key=f"sidebar_max_price_{active_prop['id'] if active_prop else 'global'}",
+                key=f"sidebar_max_price_{sidebar_price_key_suffix}",
                 help=(
                     "Prezzo massimo assoluto per notte. "
                     "PricePilot non supererà mai questo valore, "
@@ -1437,6 +1468,12 @@ def _tab_onboarding():
                                 "strategy":  "balanced",
                             })
                             st.session_state["active_prop_id"] = _new_prop["id"]
+                            _remember_saved_price_limits(_new_prop["id"], _min_val, _max_val)
+                            queue_property_pricing_widget_reset(
+                                _new_prop["id"],
+                                sidebar=True,
+                                pricing_tab=True,
+                            )
                             st.session_state[_min_key] = _min_val
                             st.session_state[_max_key] = _max_val
                             st.session_state[_step_key] = 3
@@ -1885,6 +1922,16 @@ def _tab_onboarding_v2(surface: str = "main"):
                             raise ValueError("Proprieta non trovata.")
                         prop_id = int(prop["id"])
                         st.session_state["active_prop_id"] = prop_id
+                        _remember_saved_price_limits(
+                            prop_id,
+                            prop_data["min_price"],
+                            prop_data["max_price"],
+                        )
+                        queue_property_pricing_widget_reset(
+                            prop_id,
+                            sidebar=True,
+                            pricing_tab=True,
+                        )
                         st.session_state["onb_property_id"] = prop_id
 
                         today_key = date.today().isoformat()
@@ -3296,27 +3343,23 @@ def tab_pricing(cfg: dict):
         st.info("Nessuna proprietà configurata. Vai al tab **🏠 Home** per aggiungere la tua prima proprietà.")
         return
 
-    _ps_names  = [p["name"] for p in _ps_props]
     _ps_ids    = [p["id"]   for p in _ps_props]
     _active_id = st.session_state.get("active_prop_id")
-    _ps_def    = _ps_ids.index(_active_id) if _active_id in _ps_ids else 0
+    if _active_id not in _ps_ids:
+        _active_id = _ps_ids[0]
+        st.session_state["active_prop_id"] = _active_id
 
-    _sel_idx  = st.selectbox(
-        "Proprietà",
-        options=range(len(_ps_names)),
-        format_func=lambda i: _ps_names[i],
-        index=_ps_def,
-        key="ps_prop_sel",
-    )
-    _sel_prop = _ps_props[_sel_idx]
+    _sel_prop = next(p for p in _ps_props if p["id"] == _active_id)
     _sel_id   = _sel_prop["id"]
     apply_pending_property_pricing_widget_reset(_sel_id, pricing_tab=True)
+    st.caption(f"Proprieta attiva: {_sel_prop.get('name', '')}. Cambiala dalla sidebar.")
 
     # ── Current values from DB ─────────────────────────────────────────────────
     _cur_strategy = _sel_prop.get("strategy", "balanced")
     _cur_min_float, _cur_max_float = get_synced_price_limits(_sel_prop, cfg)
     _cur_min      = int(_cur_min_float)
     _cur_max      = int(_cur_max_float)
+    _pricing_price_key_suffix = _price_limit_widget_suffix(_sel_prop, cfg)
 
     # Demand sensitivity + weekend boost live in session_state (UI-only preferences)
     _sens_key      = f"ps_demand_sens_{_sel_id}"
@@ -3392,7 +3435,7 @@ def tab_pricing(cfg: dict):
         try:
             update_property(_sel_id, {"strategy": _new_strategy})
             st.session_state["active_prop_id"] = _sel_id
-            reset_property_pricing_widget_state(_sel_id, sidebar=True, pricing_tab=False)
+            queue_property_pricing_widget_reset(_sel_id, sidebar=True, pricing_tab=False)
             st.cache_data.clear()
             st.rerun()
         except Exception as _se:
@@ -3420,14 +3463,14 @@ def tab_pricing(cfg: dict):
             "Prezzo minimo (€/notte)",
             min_value=10, max_value=9990,
             value=_cur_min, step=5,
-            key=f"ps_min_{_sel_id}",
+            key=f"ps_min_{_pricing_price_key_suffix}",
             help="Il prezzo non scenderà mai sotto questo valore.",
         )
         _new_max = st.number_input(
             "Prezzo massimo (€/notte)",
             min_value=11, max_value=9999,
             value=_cur_max, step=5,
-            key=f"ps_max_{_sel_id}",
+            key=f"ps_max_{_pricing_price_key_suffix}",
             help="Il prezzo non supererà mai questo valore.",
         )
         if int(_new_min) >= int(_new_max):
@@ -5268,6 +5311,19 @@ def tab_properties():
                             )
 
                         # ── Salva / elimina integrazioni OTA extra ────────────────
+                        st.session_state["active_prop_id"] = prop_id_saved
+                        _remember_saved_price_limits(
+                            prop_id_saved,
+                            data["min_price"],
+                            data["max_price"],
+                        )
+                        queue_property_pricing_widget_reset(
+                            prop_id_saved,
+                            sidebar=True,
+                            pricing_tab=True,
+                        )
+                        st.cache_data.clear()
+
                         _ota_extras_key = f"ota_extras_{selected_str}"
                         _del_key        = f"ota_del_ids_{selected_str}"
                         # Elimina quelle marcate per cancellazione
