@@ -23,6 +23,7 @@ from pricepilot.core.database import (
     update_user,
 )
 from pricepilot.core.plans import get_plan, normalize_plan
+from pricepilot.core.supabase_client import get_supabase_client
 from pricepilot.services.account_service import create_account_owner
 
 _KEY_USER = "pp_auth_user"
@@ -35,15 +36,7 @@ PLAN_ORDER = ("free", "plus", "pro")
 
 
 def _get_client():
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_ANON_KEY", "").strip()
-    if not url or not key:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(url, key)
-    except Exception:
-        return None
+    return get_supabase_client()
 
 
 def get_current_user() -> dict | None:
@@ -1232,26 +1225,47 @@ def _do_signup(client, email: str, password: str, account_name: str = "", plan: 
         _do_local_signup(email, password, account_name, plan)
         return
     try:
-        resp = client.auth.sign_up({"email": email, "password": password})
+        selected_plan = normalize_plan(plan)
+        resp = client.auth.sign_up({
+            "email": email,
+            "password": password,
+            "options": {
+                "data": {
+                    "account_name": account_name or "La mia attivita",
+                    "plan": selected_plan,
+                }
+            },
+        })
         user = getattr(resp, "user", None)
-        if user and getattr(user, "id", None):
-            _store_supabase_session(resp)
+        session = getattr(resp, "session", None)
+        if user and getattr(user, "id", None) and session:
+            _store_supabase_session(resp, account_name=account_name, plan=selected_plan)
             st.success("Account creato.")
             st.rerun()
+        elif user and getattr(user, "id", None):
+            _ensure_external_user(
+                email=getattr(user, "email", email),
+                external_user_id=getattr(user, "id", ""),
+                plan=selected_plan,
+                account_name=account_name,
+            )
+            st.info("Registrazione completata. Controlla la email e poi accedi.")
         else:
             st.info("Registrazione completata. Controlla la email e poi accedi.")
     except Exception as exc:
         _handle_auth_error(exc, context="registrazione")
 
 
-def _store_supabase_session(resp):
+def _store_supabase_session(resp, account_name: str = "", plan: str | None = None):
     user = getattr(resp, "user", None)
     session = getattr(resp, "session", None)
     if user:
+        metadata = getattr(user, "user_metadata", {}) or {}
         local_user = _ensure_external_user(
             email=getattr(user, "email", ""),
             external_user_id=getattr(user, "id", ""),
-            plan=_selected_plan(),
+            plan=plan or metadata.get("plan") or _selected_plan(),
+            account_name=account_name or metadata.get("account_name", ""),
         )
         _set_local_session(local_user)
     if session:
@@ -1325,7 +1339,12 @@ def _do_local_signup(email: str, password: str, account_name: str = "", plan: st
         st.error(f"Errore durante la registrazione: {exc}")
 
 
-def _ensure_external_user(email: str, external_user_id: str = "", plan: str = "free") -> dict | None:
+def _ensure_external_user(
+    email: str,
+    external_user_id: str = "",
+    plan: str = "free",
+    account_name: str = "",
+) -> dict | None:
     email = (email or "").strip().lower()
     if not email:
         return None
@@ -1338,7 +1357,7 @@ def _ensure_external_user(email: str, external_user_id: str = "", plan: str = "f
         })
         return get_user_by_email(email)
 
-    account = create_account("La mia attivita", plan=normalize_plan(plan), billing_status="dev")
+    account = create_account(account_name or "La mia attivita", plan=normalize_plan(plan), billing_status="dev")
     user = create_user(
         int(account["id"]),
         email=email,

@@ -22,8 +22,6 @@ pydantic>=2.0.0
 # (Opzionale) Jupyter per analisi ad-hoc
 # notebook>=7.0.0
 
-# Autenticazione opzionale.
-# Nota: su Python 3.14/Windows le versioni recenti di supabase possono richiedere
-# build tools C++ tramite dipendenze transitive. La dashboard funziona in dev mode
-# senza Supabase; riabilitare quando fissiamo runtime/auth di produzione.
-# supabase>=2.0.0
+# Supabase Auth + database sync
+# Pin leggero: le versioni piu recenti tirano pyiceberg/storage build su Python 3.14 Windows.
+supabase==2.10.0

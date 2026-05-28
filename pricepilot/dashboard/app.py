@@ -50,7 +50,7 @@ from pricepilot.engine.pricing_engine import calculate_recommended_price, is_wee
 from pricepilot.engine.decision_engine import process_decision
 from pricepilot.services.property_service import (
     list_properties, get_or_create_default, get_property_by_id,
-    create_property, update_property,
+    create_property, update_property, sync_property_pricing_rules,
 )
 from pricepilot.core.database import (
     get_decision_log, get_market_history,
@@ -62,7 +62,6 @@ from pricepilot.core.database import (
     get_notification_log,
     save_telegram_link, revoke_telegram_link,
     get_property_integrations, upsert_property_integration, delete_property_integration,
-    upsert_property,
     get_current_price_for_date, get_price_calendar, upsert_calendar_price,
 )
 from pricepilot.services.readiness import account_readiness
@@ -154,6 +153,146 @@ def reset_property_pricing_widget_state(
         ])
     for key in keys:
         st.session_state.pop(key, None)
+
+
+def queue_property_pricing_widget_reset(
+    prop_id: int | str | None,
+    *,
+    sidebar: bool = True,
+    pricing_tab: bool = True,
+) -> None:
+    """Accoda il reset dei widget per il prossimo render della vista interessata."""
+    if not prop_id:
+        return
+    key = f"pp_pending_price_widget_reset_{prop_id}"
+    current = st.session_state.get(key, {"sidebar": False, "pricing_tab": False})
+    st.session_state[key] = {
+        "sidebar": bool(current.get("sidebar")) or sidebar,
+        "pricing_tab": bool(current.get("pricing_tab")) or pricing_tab,
+    }
+
+
+def apply_pending_property_pricing_widget_reset(
+    prop_id: int | str | None,
+    *,
+    sidebar: bool = False,
+    pricing_tab: bool = False,
+) -> None:
+    """Applica reset accodati prima che i widget Streamlit vengano renderizzati."""
+    if not prop_id:
+        return
+    key = f"pp_pending_price_widget_reset_{prop_id}"
+    pending = st.session_state.get(key)
+    if not pending:
+        return
+
+    reset_sidebar = sidebar and bool(pending.get("sidebar"))
+    reset_pricing_tab = pricing_tab and bool(pending.get("pricing_tab"))
+    if reset_sidebar or reset_pricing_tab:
+        reset_property_pricing_widget_state(
+            prop_id,
+            sidebar=reset_sidebar,
+            pricing_tab=reset_pricing_tab,
+        )
+
+    remaining = {
+        "sidebar": bool(pending.get("sidebar")) and not reset_sidebar,
+        "pricing_tab": bool(pending.get("pricing_tab")) and not reset_pricing_tab,
+    }
+    if remaining["sidebar"] or remaining["pricing_tab"]:
+        st.session_state[key] = remaining
+    else:
+        st.session_state.pop(key, None)
+
+
+def _price_limit_state_keys(prop_id: int | str) -> tuple[str, str, str]:
+    return (
+        f"pp_price_min_{prop_id}",
+        f"pp_price_max_{prop_id}",
+        f"pp_price_limits_saved_{prop_id}",
+    )
+
+
+def get_synced_price_limits(prop: dict | None, cfg: dict | None = None) -> tuple[float, float]:
+    """Ritorna i limiti prezzo condivisi tra sidebar e tab Prezzi."""
+    cfg = cfg or {}
+    if not prop:
+        return (
+            float(cfg.get("min_price_per_night", 50.0)),
+            float(cfg.get("max_price_per_night", 500.0)),
+        )
+
+    prop_id = prop["id"]
+    min_key, max_key, saved_key = _price_limit_state_keys(prop_id)
+    saved_min = float(prop.get("min_price", cfg.get("min_price_per_night", 50.0)))
+    saved_max = float(prop.get("max_price", cfg.get("max_price_per_night", 500.0)))
+    saved_signature = (saved_min, saved_max)
+
+    if st.session_state.get(saved_key) != saved_signature:
+        st.session_state[min_key] = saved_min
+        st.session_state[max_key] = saved_max
+        st.session_state[saved_key] = saved_signature
+    else:
+        st.session_state.setdefault(min_key, saved_min)
+        st.session_state.setdefault(max_key, saved_max)
+
+    return float(st.session_state[min_key]), float(st.session_state[max_key])
+
+
+def save_synced_price_limits(
+    prop: dict,
+    min_price: float,
+    max_price: float,
+    *,
+    strategy: str | None = None,
+    reset_sidebar: bool = True,
+    reset_pricing_tab: bool = True,
+    pricing_rules: dict | None = None,
+) -> dict | None:
+    """Salva min/max su proprieta, config e session_state in un unico punto."""
+    prop_id = int(prop["id"])
+    min_value = float(min_price)
+    max_value = float(max_price)
+    if min_value >= max_value:
+        raise ValueError("Il prezzo minimo deve essere inferiore al prezzo massimo.")
+
+    data = {
+        "min_price": min_value,
+        "max_price": max_value,
+    }
+    if strategy is not None:
+        data["strategy"] = strategy
+
+    updated_prop = update_property(prop_id, data)
+    save_config({
+        **load_config(),
+        "min_price_per_night": min_value,
+        "max_price_per_night": max_value,
+        **({"strategy": strategy} if strategy is not None else {}),
+    })
+
+    min_key, max_key, saved_key = _price_limit_state_keys(prop_id)
+    st.session_state[min_key] = min_value
+    st.session_state[max_key] = max_value
+    st.session_state[saved_key] = (min_value, max_value)
+    st.session_state["active_prop_id"] = prop_id
+    if updated_prop:
+        sync_property_pricing_rules(
+            updated_prop,
+            {
+                "min_price": min_value,
+                "max_price": max_value,
+                **({"strategy": strategy} if strategy is not None else {}),
+                **(pricing_rules or {}),
+            },
+        )
+    queue_property_pricing_widget_reset(
+        prop_id,
+        sidebar=reset_sidebar,
+        pricing_tab=reset_pricing_tab,
+    )
+    st.cache_data.clear()
+    return updated_prop
 
 
 # Plotly toolbar config (keep zoom, pan, download PNG only).
@@ -899,6 +1038,8 @@ def render_sidebar():
             st.session_state.setdefault("active_prop_id", None)
 
         st.markdown("---")
+        if active_prop:
+            apply_pending_property_pricing_widget_reset(active_prop["id"], sidebar=True)
 
         # ── Configurazione strategia ──────────────────────────────────────────
         st.markdown("### 🎯 Strategia")
@@ -935,8 +1076,13 @@ def render_sidebar():
             st.caption("Stessi limiti della tab Prezzi per la proprieta attiva.")
         else:
             st.caption("Crea una proprieta per salvare limiti specifici.")
-        sidebar_min_value = float(active_prop.get("min_price", cfg.get("min_price_per_night", 50.0))) if active_prop else float(cfg.get("min_price_per_night", 50.0))
-        sidebar_max_value = float(active_prop.get("max_price", cfg.get("max_price_per_night", 500.0))) if active_prop else float(cfg.get("max_price_per_night", 500.0))
+        sidebar_min_value, sidebar_max_value = get_synced_price_limits(active_prop, cfg)
+        if active_prop:
+            _sidebar_flash = st.session_state.pop(f"pp_sidebar_price_flash_{active_prop['id']}", None)
+        else:
+            _sidebar_flash = st.session_state.pop("pp_sidebar_price_flash_global", None)
+        if _sidebar_flash:
+            st.success(_sidebar_flash)
         col1, col2 = st.columns(2)
         with col1:
             min_price = st.number_input(
@@ -995,19 +1141,37 @@ def render_sidebar():
                 "occupancy_low_threshold":  occ_low,
                 "occupancy_high_threshold": occ_high,
             }
-            save_config(new_cfg)
             if active_prop:
                 prop_id = active_prop["id"]
-                update_property(prop_id, {
-                    **active_prop,
-                    "min_price": float(min_price),
-                    "max_price": float(max_price),
+                save_synced_price_limits(
+                    active_prop,
+                    float(min_price),
+                    float(max_price),
+                    strategy=strategy_sel,
+                    reset_sidebar=False,
+                    reset_pricing_tab=True,
+                    pricing_rules={
+                        "max_change_pct": max_change,
+                        "occupancy_low_threshold": occ_low,
+                        "occupancy_high_threshold": occ_high,
+                    },
+                )
+                save_config({
+                    **load_config(),
+                    "min_price_per_night": float(min_price),
+                    "max_price_per_night": float(max_price),
+                    "max_change_pct": max_change,
                     "strategy": strategy_sel,
+                    "occupancy_low_threshold": occ_low,
+                    "occupancy_high_threshold": occ_high,
                 })
-                st.session_state["active_prop_id"] = prop_id
-                reset_property_pricing_widget_state(prop_id, sidebar=False, pricing_tab=True)
-            st.success("✅ Salvato!")
-            st.cache_data.clear()
+                st.session_state[f"pp_sidebar_price_flash_{prop_id}"] = (
+                    "Limiti prezzo salvati e sincronizzati."
+                )
+            else:
+                save_config(new_cfg)
+                st.cache_data.clear()
+                st.session_state["pp_sidebar_price_flash_global"] = "Configurazione salvata."
             st.rerun()
 
         st.markdown("---")
@@ -3146,17 +3310,23 @@ def tab_pricing(cfg: dict):
     )
     _sel_prop = _ps_props[_sel_idx]
     _sel_id   = _sel_prop["id"]
+    apply_pending_property_pricing_widget_reset(_sel_id, pricing_tab=True)
 
     # ── Current values from DB ─────────────────────────────────────────────────
     _cur_strategy = _sel_prop.get("strategy", "balanced")
-    _cur_min      = int(float(_sel_prop.get("min_price", 50)))
-    _cur_max      = int(float(_sel_prop.get("max_price", 300)))
+    _cur_min_float, _cur_max_float = get_synced_price_limits(_sel_prop, cfg)
+    _cur_min      = int(_cur_min_float)
+    _cur_max      = int(_cur_max_float)
 
     # Demand sensitivity + weekend boost live in session_state (UI-only preferences)
     _sens_key      = f"ps_demand_sens_{_sel_id}"
     _boost_key     = f"ps_weekend_boost_{_sel_id}"
     _cur_sens      = st.session_state.get(_sens_key, 5)
     _cur_boost     = st.session_state.get(_boost_key, 20)
+
+    _pricing_flash = st.session_state.pop(f"pp_pricing_price_flash_{_sel_id}", None)
+    if _pricing_flash:
+        st.success(_pricing_flash)
 
     st.markdown("---")
 
@@ -3220,9 +3390,7 @@ def tab_pricing(cfg: dict):
     # Apply strategy change immediately (no Save needed for strategy)
     if _new_strategy != _cur_strategy:
         try:
-            _upd = dict(_sel_prop)
-            _upd["strategy"] = _new_strategy
-            upsert_property(_upd)
+            update_property(_sel_id, {"strategy": _new_strategy})
             st.session_state["active_prop_id"] = _sel_id
             reset_property_pricing_widget_state(_sel_id, sidebar=True, pricing_tab=False)
             st.cache_data.clear()
@@ -3333,29 +3501,19 @@ def tab_pricing(cfg: dict):
             use_container_width=True,
         ):
             try:
-                _save_data = dict(_sel_prop)
-                _save_data["min_price"] = float(_new_min)
-                _save_data["max_price"] = float(_new_max)
-                # La strategia è già salvata al click; la includiamo per sicurezza
-                _save_data["strategy"]  = _new_strategy
-                upsert_property(_save_data)
-                save_config({
-                    **load_config(),
-                    "min_price_per_night": float(_new_min),
-                    "max_price_per_night": float(_new_max),
-                    "strategy": _new_strategy,
-                })
+                save_synced_price_limits(
+                    _sel_prop,
+                    float(_new_min),
+                    float(_new_max),
+                    strategy=_new_strategy,
+                    reset_sidebar=True,
+                    reset_pricing_tab=False,
+                )
                 # Persist session-only preferences
                 st.session_state[_sens_key]  = _new_sens
                 st.session_state[_boost_key] = _new_boost
-                st.session_state["active_prop_id"] = _sel_id
-                reset_property_pricing_widget_state(_sel_id, sidebar=True, pricing_tab=False)
-                st.cache_data.clear()
-                st.markdown(
-                    '<div class="ps-save-hint">'
-                    '✅ Impostazioni salvate. PricePilot le applicherà alla prossima analisi.'
-                    '</div>',
-                    unsafe_allow_html=True,
+                st.session_state[f"pp_pricing_price_flash_{_sel_id}"] = (
+                    "Impostazioni salvate e limiti prezzo sincronizzati."
                 )
                 st.rerun()
             except Exception as _se:

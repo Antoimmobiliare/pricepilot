@@ -1292,6 +1292,26 @@ def upsert_property(prop: Dict) -> int:
             ))
             return prop["id"]
         else:
+            if prop.get("id"):
+                conn.execute("""
+                    INSERT INTO properties
+                        (id, account_id, name, platform, listing_url, listing_id, city,
+                         latitude, longitude, min_price, max_price,
+                         sync_mode, strategy, plan, created_at, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    prop["id"],
+                    prop.get("account_id", 1),
+                    prop["name"], prop.get("platform", "airbnb"),
+                    prop.get("listing_url", ""), prop.get("listing_id", ""),
+                    prop.get("city", ""), prop.get("latitude"), prop.get("longitude"),
+                    prop.get("min_price", 50), prop.get("max_price", 500),
+                    prop.get("sync_mode", "advisory"),
+                    prop.get("strategy", "balanced"),
+                    prop.get("plan", "free"),
+                    now, now,
+                ))
+                return prop["id"]
             cur = conn.execute("""
                 INSERT INTO properties
                     (account_id, name, platform, listing_url, listing_id, city,

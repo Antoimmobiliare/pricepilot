@@ -11,12 +11,20 @@ from pricepilot.core.database import (
 )
 from pricepilot.models.property import Property, SYNC_MODES, PLATFORMS
 from pricepilot.core.plans import PLANS, effective_sync_mode, get_plan_limit, normalize_plan
+from pricepilot.services.supabase_repository import (
+    delete_property_from_supabase,
+    refresh_properties_from_supabase,
+    sync_property_and_pricing_to_supabase,
+    sync_pricing_rule_to_supabase,
+)
 
 logger = logging.getLogger("pricepilot.property_service")
 
 
 def list_properties(account_id: Optional[int] = None) -> List[Dict]:
     """Ritorna le proprieta dell'account, o tutte in modalita admin/dev."""
+    if account_id is not None:
+        refresh_properties_from_supabase(int(account_id))
     props = get_properties()
     if account_id is None:
         return props
@@ -42,6 +50,7 @@ def create_property(data: Dict) -> Dict:
     _enforce_property_limit(data)
     new_id = upsert_property(data)
     prop   = get_property(new_id)
+    sync_property_and_pricing_to_supabase(prop)
     logger.info(f"Proprietà creata: id={new_id} name={data['name']}")
     return prop
 
@@ -54,17 +63,27 @@ def update_property(prop_id: int, data: Dict) -> Optional[Dict]:
     merged = {**existing, **data, "id": prop_id}
     _validate(merged)
     upsert_property(merged)
+    updated = get_property(prop_id)
+    if updated:
+        sync_property_and_pricing_to_supabase(updated)
     logger.info(f"Proprietà aggiornata: id={prop_id}")
-    return get_property(prop_id)
+    return updated
 
 
 def remove_property(prop_id: int) -> bool:
     """Rimuove una proprietà. Ritorna True se esisteva."""
-    if not get_property(prop_id):
+    prop = get_property(prop_id)
+    if not prop:
         return False
+    delete_property_from_supabase(prop)
     delete_property(prop_id)
     logger.info(f"Proprietà eliminata: id={prop_id}")
     return True
+
+
+def sync_property_pricing_rules(prop: Dict, rules: Optional[Dict] = None) -> None:
+    """Sincronizza su Supabase le regole prezzo reali della proprieta."""
+    sync_pricing_rule_to_supabase(prop, rules or {})
 
 
 def get_or_create_default(account_id: int = 1) -> Dict:
