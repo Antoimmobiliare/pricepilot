@@ -912,6 +912,42 @@ st.markdown("""
         margin-top: 4px;
     }
 
+    @media (max-width: 767px) {
+        .rev-kpi-card,
+        .summary-metric-card,
+        .mkt-metric {
+            padding: 14px 10px 12px;
+        }
+        .rev-kpi-label,
+        .rev-kpi-value,
+        .rev-kpi-delta,
+        .rev-kpi-desc,
+        .sm-label,
+        .sm-value,
+        .sm-sub,
+        .mkt-metric-label,
+        .mkt-metric-value,
+        .mkt-metric-sub {
+            word-break: normal;
+            overflow-wrap: normal;
+            hyphens: none;
+            white-space: normal;
+        }
+        .rev-kpi-icon { font-size: 1.15rem; margin-bottom: 7px; }
+        .rev-kpi-label { font-size: 0.56rem; letter-spacing: 0.04em; }
+        .rev-kpi-value { font-size: 1.65rem; }
+        .rev-kpi-delta { font-size: 0.62rem; padding: 3px 7px; }
+        .rev-kpi-desc { font-size: 0.62rem; }
+        .sm-icon { font-size: 1.25rem; }
+        .sm-label { font-size: 0.58rem; letter-spacing: 0.04em; }
+        .sm-value { font-size: 1.35rem; }
+        .sm-sub { font-size: 0.64rem; }
+        .mkt-metric-icon { font-size: 1.05rem; }
+        .mkt-metric-label { font-size: 0.55rem; letter-spacing: 0.04em; }
+        .mkt-metric-value { font-size: 1.2rem; }
+        .mkt-metric-sub { font-size: 0.62rem; }
+    }
+
     /* Position + explanation bar */
     .mkt-context-bar {
         background: white;
