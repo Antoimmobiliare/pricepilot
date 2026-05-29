@@ -948,6 +948,36 @@ st.markdown("""
         .mkt-metric-sub { font-size: 0.62rem; }
     }
 
+    @media (max-width: 599px) {
+        .rev-kpi-wrap {
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .rev-kpi-wrap .rev-kpi-card,
+        .rev-kpi-wrap .rev-kpi-card.primary {
+            flex: 0 0 calc(50% - 5px);
+            max-width: calc(50% - 5px);
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        .rev-kpi-label,
+        .rev-kpi-value,
+        .rev-kpi-delta,
+        .rev-kpi-desc {
+            word-break: normal;
+            overflow-wrap: normal;
+            hyphens: none;
+        }
+    }
+
+    @media (max-width: 429px) {
+        .rev-kpi-wrap .rev-kpi-card,
+        .rev-kpi-wrap .rev-kpi-card.primary {
+            flex-basis: 100%;
+            max-width: 100%;
+        }
+    }
+
     /* Position + explanation bar */
     .mkt-context-bar {
         background: white;
