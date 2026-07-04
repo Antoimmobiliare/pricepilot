@@ -25,3 +25,6 @@ pydantic>=2.0.0
 # Supabase Auth + database sync
 # Pin leggero: le versioni piu recenti tirano pyiceberg/storage build su Python 3.14 Windows.
 supabase==2.10.0
+
+# Billing subscriptions
+stripe>=11.0.0

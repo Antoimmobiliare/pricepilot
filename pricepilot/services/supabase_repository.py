@@ -11,22 +11,163 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from pricepilot.core.database import get_property, upsert_property
-from pricepilot.core.supabase_client import get_supabase_client, supabase_available
+from pricepilot.core.database import get_properties, get_property, upsert_property
+from pricepilot.core.supabase_client import (
+    get_supabase_account_client,
+    supabase_available,
+)
 
 logger = logging.getLogger("pricepilot.supabase_repository")
 
+ACCOUNTS_TABLE = os.environ.get("PRICEPILOT_SUPABASE_ACCOUNTS_TABLE", "accounts")
+ACCOUNT_MEMBERS_TABLE = os.environ.get("PRICEPILOT_SUPABASE_ACCOUNT_MEMBERS_TABLE", "account_members")
+PROFILES_TABLE = os.environ.get("PRICEPILOT_SUPABASE_PROFILES_TABLE", "profiles")
+USER_CONSENTS_TABLE = os.environ.get("PRICEPILOT_SUPABASE_USER_CONSENTS_TABLE", "user_consents")
 PROPERTIES_TABLE = os.environ.get("PRICEPILOT_SUPABASE_PROPERTIES_TABLE", "properties")
 PRICING_RULES_TABLE = os.environ.get("PRICEPILOT_SUPABASE_PRICING_RULES_TABLE", "pricing_rules")
+_BACKFILLED_ACCOUNTS: set[int] = set()
 
 
 def is_supabase_db_ready() -> bool:
     return supabase_available()
 
 
+def has_supabase_write_context() -> bool:
+    """True quando possiamo accedere a tabelle RLS account-scoped."""
+    return get_supabase_account_client() is not None
+
+
+def sync_account_to_supabase(account: Dict) -> bool:
+    """Crea/aggiorna solo l'account su Supabase, usato da billing/webhook backend."""
+    client = get_supabase_account_client()
+    account_id = _as_int((account or {}).get("id"))
+    if client is None or not account_id:
+        return False
+
+    payload = {
+        "id": account_id,
+        "name": account.get("name") or "La mia attivita",
+        "plan": account.get("plan") or "free",
+        "billing_status": account.get("billing_status") or "dev",
+        "trial_ends_at": account.get("trial_ends_at"),
+        "current_period_ends_at": account.get("current_period_ends_at"),
+        "stripe_customer_id": account.get("stripe_customer_id") or "",
+        "stripe_subscription_id": account.get("stripe_subscription_id") or "",
+    }
+    result = _safe_execute(
+        lambda: client.table(ACCOUNTS_TABLE)
+        .upsert(payload, on_conflict="id")
+        .execute(),
+        default=None,
+        action="sync_account_billing",
+    )
+    return result is not None
+
+
+def sync_account_membership_to_supabase(
+    account: Dict,
+    user: Dict,
+    supabase_user_id: str,
+) -> bool:
+    """
+    Crea/aggiorna profilo, account e membership su Supabase.
+
+    Serve per far funzionare le policy RLS basate su auth.uid(): prima di
+    sincronizzare proprieta o regole prezzo, Supabase deve sapere a quale
+    account appartiene l'utente autenticato.
+    """
+    client = get_supabase_account_client()
+    if client is None or not account or not user or not supabase_user_id:
+        return False
+
+    account_id = _as_int(account.get("id") or user.get("account_id"))
+    if not account_id:
+        return False
+
+    email = str(user.get("email") or "").strip().lower()
+    role = str(user.get("role") or "owner").strip().lower()
+    if role not in {"owner", "manager", "viewer"}:
+        role = "owner"
+
+    profile_payload = {
+        "id": supabase_user_id,
+        "email": email,
+        "full_name": user.get("full_name", "") or "",
+    }
+    account_payload = {
+        "id": account_id,
+        "name": account.get("name") or "La mia attivita",
+        "plan": account.get("plan") or "free",
+        "billing_status": account.get("billing_status") or "dev",
+        "trial_ends_at": account.get("trial_ends_at"),
+        "current_period_ends_at": account.get("current_period_ends_at"),
+        "stripe_customer_id": account.get("stripe_customer_id") or "",
+        "stripe_subscription_id": account.get("stripe_subscription_id") or "",
+        "owner_user_id": supabase_user_id,
+    }
+    membership_payload = {
+        "account_id": account_id,
+        "user_id": supabase_user_id,
+        "role": role,
+    }
+
+    profile = _safe_execute(
+        lambda: client.table(PROFILES_TABLE)
+        .upsert(profile_payload, on_conflict="id")
+        .execute(),
+        default=None,
+        action="sync_profile",
+    )
+    remote_account = _safe_execute(
+        lambda: client.table(ACCOUNTS_TABLE)
+        .upsert(account_payload, on_conflict="id")
+        .execute(),
+        default=None,
+        action="sync_account",
+    )
+    membership = _safe_execute(
+        lambda: client.table(ACCOUNT_MEMBERS_TABLE)
+        .upsert(membership_payload, on_conflict="account_id,user_id")
+        .execute(),
+        default=None,
+        action="sync_account_membership",
+    )
+    return profile is not None and remote_account is not None and membership is not None
+
+
+def sync_user_consent_to_supabase(
+    consent: Dict,
+    supabase_user_id: str,
+) -> bool:
+    """Sincronizza il consenso utente su Supabase quando la sessione auth e valida."""
+    client = get_supabase_account_client()
+    if client is None or not consent or not supabase_user_id:
+        return False
+
+    payload = {
+        "account_id": int(consent.get("account_id") or 1),
+        "user_id": supabase_user_id,
+        "terms_accepted": bool(consent.get("terms_accepted")),
+        "privacy_accepted": bool(consent.get("privacy_accepted")),
+        "marketing_accepted": bool(consent.get("marketing_accepted")),
+        "terms_version": consent.get("terms_version") or "2026-06-23",
+        "privacy_version": consent.get("privacy_version") or "2026-06-23",
+        "source": consent.get("source") or "signup",
+        "accepted_at": consent.get("accepted_at") or datetime.utcnow().isoformat(),
+    }
+    rows = _safe_execute(
+        lambda: client.table(USER_CONSENTS_TABLE)
+        .upsert(payload, on_conflict="user_id,terms_version,privacy_version")
+        .execute(),
+        default=None,
+        action="sync_user_consent",
+    )
+    return rows is not None
+
+
 def refresh_properties_from_supabase(account_id: int) -> int:
     """Aggiorna SQLite con eventuali proprieta piu recenti presenti su Supabase."""
-    client = get_supabase_client()
+    client = get_supabase_account_client()
     if client is None:
         return 0
 
@@ -54,8 +195,63 @@ def refresh_properties_from_supabase(account_id: int) -> int:
     return refreshed
 
 
+def backfill_account_properties_to_supabase(
+    account_id: int,
+    properties: Optional[list[Dict]] = None,
+) -> Dict[str, int]:
+    """
+    Sincronizza una volta le proprieta locali gia esistenti verso Supabase.
+
+    Serve quando un utente collega Supabase dopo aver creato dati in SQLite:
+    il normale flusso di creazione sincronizza i nuovi record, ma i record
+    precedenti devono essere copiati senza costringere l'utente a ricrearli.
+    """
+    account_id = int(account_id or 1)
+    if get_supabase_account_client() is None:
+        return {"properties": 0, "pricing_rules": 0, "skipped": 1}
+
+    if account_id in _BACKFILLED_ACCOUNTS:
+        return {"properties": 0, "pricing_rules": 0, "skipped": 1}
+
+    local_props = properties
+    if local_props is None:
+        local_props = [
+            p for p in get_properties()
+            if int(p.get("account_id") or 1) == account_id
+        ]
+
+    if not local_props:
+        _BACKFILLED_ACCOUNTS.add(account_id)
+        return {"properties": 0, "pricing_rules": 0, "skipped": 0}
+
+    synced_properties = 0
+    synced_rules = 0
+    for prop in local_props:
+        try:
+            if sync_property_to_supabase(prop):
+                synced_properties += 1
+            if sync_pricing_rule_to_supabase(prop):
+                synced_rules += 1
+        except Exception as exc:
+            logger.warning(
+                "Supabase backfill proprieta non riuscito account=%s property=%s: %s",
+                account_id,
+                prop.get("id"),
+                exc,
+            )
+
+    if synced_properties == len(local_props) and synced_rules == len(local_props):
+        _BACKFILLED_ACCOUNTS.add(account_id)
+
+    return {
+        "properties": synced_properties,
+        "pricing_rules": synced_rules,
+        "skipped": 0,
+    }
+
+
 def sync_property_to_supabase(prop: Dict) -> Optional[Dict]:
-    client = get_supabase_client()
+    client = get_supabase_account_client()
     if client is None or not prop:
         return None
 
@@ -71,7 +267,7 @@ def sync_property_to_supabase(prop: Dict) -> Optional[Dict]:
 
 
 def delete_property_from_supabase(prop: Dict) -> bool:
-    client = get_supabase_client()
+    client = get_supabase_account_client()
     if client is None or not prop:
         return False
 
@@ -97,7 +293,7 @@ def delete_property_from_supabase(prop: Dict) -> bool:
 
 
 def sync_pricing_rule_to_supabase(prop: Dict, rules: Optional[Dict] = None) -> Optional[Dict]:
-    client = get_supabase_client()
+    client = get_supabase_account_client()
     if client is None or not prop:
         return None
 

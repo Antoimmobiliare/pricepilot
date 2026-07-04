@@ -9,29 +9,47 @@ from __future__ import annotations
 
 import hashlib
 import html as _html
+import json
 import os
 import secrets
 from datetime import datetime
+from types import SimpleNamespace
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from pricepilot.core.database import (
     create_account,
+    create_auth_session,
     create_user,
+    get_account,
+    get_latest_user_consent,
+    get_user_by_auth_session,
     get_user_by_email,
+    record_user_consent,
+    revoke_auth_session,
     update_user,
 )
 from pricepilot.core.plans import get_plan, normalize_plan
 from pricepilot.core.supabase_client import get_supabase_client
 from pricepilot.services.account_service import create_account_owner
+from pricepilot.services.supabase_repository import (
+    sync_account_membership_to_supabase,
+    sync_user_consent_to_supabase,
+)
 
 _KEY_USER = "pp_auth_user"
 _KEY_SESSION = "pp_auth_session"
 _KEY_PUBLIC_VIEW = "pp_public_view"
 _KEY_SELECTED_PLAN = "pp_selected_plan"
+_KEY_PENDING_AUTH_COOKIE = "pp_pending_auth_cookie"
+_KEY_CLEAR_AUTH_COOKIE = "pp_clear_auth_cookie"
+_KEY_AUTH_NOTICE = "pp_auth_notice"
+_COOKIE_AUTH_TOKEN = "pp_auth_token"
+TERMS_VERSION = "2026-06-23"
+PRIVACY_VERSION = "2026-06-23"
 
-PUBLIC_VIEWS = {"landing", "login", "register", "forgot"}
+PUBLIC_VIEWS = {"landing", "login", "register", "forgot", "reset_password", "terms", "privacy"}
 PLAN_ORDER = ("free", "plus", "pro")
 
 
@@ -51,6 +69,63 @@ def get_current_account_id() -> int:
         return 1
 
 
+def _get_auth_cookie() -> str:
+    try:
+        cookies = getattr(st.context, "cookies", {}) or {}
+        return str(cookies.get(_COOKIE_AUTH_TOKEN, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _emit_auth_cookie(token: str = "", *, clear: bool = False) -> None:
+    token_js = json.dumps(token or "")
+    name_js = json.dumps(_COOKIE_AUTH_TOKEN)
+    max_age = 0 if clear else 60 * 60 * 24 * 14
+    components.html(
+        f"""
+        <script>
+        (() => {{
+          try {{
+            const w = window.parent || window;
+            const secure = w.location.protocol === "https:" ? "; Secure" : "";
+            const value = {token_js};
+            const name = {name_js};
+            w.document.cookie = `${{name}}=${{encodeURIComponent(value)}}; path=/; max-age={max_age}; SameSite=Lax${{secure}}`;
+          }} catch (error) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _queue_auth_cookie(token: str) -> None:
+    if token:
+        st.session_state[_KEY_PENDING_AUTH_COOKIE] = token
+
+
+def _emit_pending_auth_cookie() -> None:
+    if st.session_state.pop(_KEY_CLEAR_AUTH_COOKIE, False):
+        _emit_auth_cookie(clear=True)
+        st.session_state.pop(_KEY_PENDING_AUTH_COOKIE, None)
+        return
+    token = st.session_state.pop(_KEY_PENDING_AUTH_COOKIE, "")
+    if token:
+        _emit_auth_cookie(token)
+
+
+def _restore_session_from_cookie() -> bool:
+    token = _get_auth_cookie()
+    if not token:
+        return False
+    user = get_user_by_auth_session(token)
+    if not user:
+        st.session_state[_KEY_CLEAR_AUTH_COOKIE] = True
+        return False
+    _set_local_session(user)
+    return True
+
+
 def logout():
     client = _get_client()
     if client:
@@ -58,8 +133,11 @@ def logout():
             client.auth.sign_out()
         except Exception:
             pass
+    token = _get_auth_cookie() or st.session_state.get(_KEY_PENDING_AUTH_COOKIE, "")
+    revoke_auth_session(token)
     st.session_state.pop(_KEY_USER, None)
     st.session_state.pop(_KEY_SESSION, None)
+    st.session_state[_KEY_CLEAR_AUTH_COOKIE] = True
 
 
 def render_logout_button():
@@ -90,12 +168,92 @@ def _selected_plan() -> str:
     return normalize_plan(st.session_state.get(_KEY_SELECTED_PLAN, "free"))
 
 
+def _is_production() -> bool:
+    return os.environ.get("PRICEPILOT_ENV", "").strip().lower() == "production"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _local_auth_allowed() -> bool:
+    if not _is_production():
+        return True
+    return _env_flag("PRICEPILOT_ALLOW_LOCAL_AUTH")
+
+
+def _disabled_auth_allowed() -> bool:
+    return os.environ.get("PRICEPILOT_AUTH_MODE", "local").strip().lower() == "disabled" and not _is_production()
+
+
+def _first_env_url(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value.rstrip("/")
+    return ""
+
+
+def _auth_redirect_url() -> str:
+    return _first_env_url(
+        "SUPABASE_AUTH_REDIRECT_URL",
+        "APP_BASE_URL",
+        "SUPABASE_PASSWORD_RESET_REDIRECT_URL",
+    ) or "http://localhost:8501"
+
+
+def _password_reset_redirect_url() -> str:
+    return _first_env_url(
+        "SUPABASE_PASSWORD_RESET_REDIRECT_URL",
+        "SUPABASE_AUTH_REDIRECT_URL",
+        "APP_BASE_URL",
+    ) or "http://localhost:8501"
+
+
+def _paid_signup_without_checkout_allowed() -> bool:
+    if not _is_production():
+        return True
+    return os.environ.get("PRICEPILOT_ALLOW_PAID_SIGNUP_WITHOUT_CHECKOUT", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _account_plan_for_signup(plan: str | None) -> str:
+    selected = normalize_plan(plan)
+    if selected == "free" or _paid_signup_without_checkout_allowed():
+        return selected
+    return "free"
+
+
+def _signup_plan_requires_checkout(plan: str | None) -> bool:
+    selected = normalize_plan(plan)
+    return selected != _account_plan_for_signup(selected)
+
+
 def require_auth() -> bool:
-    if get_current_user():
+    current_user = get_current_user()
+    if current_user:
+        if not _get_auth_cookie() and not st.session_state.get(_KEY_PENDING_AUTH_COOKIE):
+            _queue_auth_cookie(create_auth_session(int(current_user["id"])))
+        _emit_pending_auth_cookie()
+        return True
+
+    if _restore_session_from_cookie():
+        _emit_pending_auth_cookie()
         return True
 
     auth_mode = os.environ.get("PRICEPILOT_AUTH_MODE", "local").strip().lower()
     if auth_mode == "disabled":
+        if _is_production():
+            st.sidebar.error(
+                "Autenticazione disabilitata non consentita in produzione. "
+                "Configura Supabase Auth oppure cambia PRICEPILOT_ENV.",
+                icon="!",
+            )
+            _render_auth_page(_get_client())
+            return False
         st.sidebar.warning(
             "Autenticazione disabilitata. Stai usando PRICEPILOT_AUTH_MODE=disabled.",
             icon="!",
@@ -103,19 +261,162 @@ def require_auth() -> bool:
         return True
 
     client = _get_client()
+    if _is_production() and client is None:
+        st.sidebar.error(
+            "Supabase Auth non configurato. In produzione il fallback locale e disattivato.",
+            icon="!",
+        )
     _render_auth_page(client)
     return False
 
 
 def _render_auth_page(client):
+    _emit_pending_auth_cookie()
     _inject_public_css()
+    _capture_supabase_auth_hash()
+    if _handle_supabase_auth_redirect(client):
+        return
     view = st.session_state.get(_KEY_PUBLIC_VIEW, "landing")
     if view not in PUBLIC_VIEWS:
         view = "landing"
     if view == "landing":
         _render_landing_page()
+    elif view in {"terms", "privacy"}:
+        _render_legal_page(view)
     else:
         _render_auth_panel(client, view)
+
+
+def _capture_supabase_auth_hash() -> None:
+    components.html(
+        """
+        <script>
+        (() => {
+          try {
+            const w = window.parent || window;
+            const hash = w.location.hash || "";
+            if (!hash || (!hash.includes("access_token=") && !hash.includes("error_code=") && !hash.includes("error="))) {
+              return;
+            }
+            const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+            const url = new URL(w.location.href);
+            const params = new URLSearchParams(raw);
+            params.forEach((value, key) => url.searchParams.set(key, value));
+            url.searchParams.set("pp_auth_redirect", "1");
+            url.hash = "";
+            w.location.replace(url.toString());
+          } catch (error) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _query_param(name: str) -> str:
+    try:
+        value = st.query_params.get(name, "")
+    except Exception:
+        return ""
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    return str(value or "").strip()
+
+
+def _clear_auth_query_params() -> None:
+    try:
+        for name in (
+            "pp_auth_redirect",
+            "access_token",
+            "refresh_token",
+            "token_type",
+            "expires_in",
+            "expires_at",
+            "type",
+            "code",
+            "error",
+            "error_code",
+            "error_description",
+        ):
+            if name in st.query_params:
+                del st.query_params[name]
+    except Exception:
+        pass
+
+
+def _handle_supabase_auth_redirect(client) -> bool:
+    has_redirect_data = bool(
+        _query_param("pp_auth_redirect")
+        or _query_param("access_token")
+        or _query_param("refresh_token")
+        or _query_param("code")
+        or _query_param("error")
+        or _query_param("error_code")
+    )
+    if not has_redirect_data:
+        return False
+
+    error_description = _query_param("error_description") or _query_param("error")
+    if error_description:
+        st.session_state[_KEY_PUBLIC_VIEW] = "login"
+        st.session_state[_KEY_AUTH_NOTICE] = _friendly_auth_redirect_error(error_description)
+        _clear_auth_query_params()
+        st.rerun()
+
+    if client is None:
+        st.session_state[_KEY_PUBLIC_VIEW] = "login"
+        st.session_state[_KEY_AUTH_NOTICE] = "Link ricevuto, ma Supabase non e configurato in questa istanza."
+        _clear_auth_query_params()
+        st.rerun()
+
+    try:
+        resp = None
+        code = _query_param("code")
+        access_token = _query_param("access_token")
+        refresh_token = _query_param("refresh_token")
+        if code and hasattr(client.auth, "exchange_code_for_session"):
+            resp = client.auth.exchange_code_for_session({
+                "auth_code": code,
+                "redirect_to": _auth_redirect_url(),
+            })
+        elif access_token and refresh_token and hasattr(client.auth, "set_session"):
+            resp = client.auth.set_session(access_token, refresh_token)
+
+        if resp is None:
+            st.session_state[_KEY_PUBLIC_VIEW] = "login"
+            st.session_state[_KEY_AUTH_NOTICE] = "Link non riconosciuto. Richiedi un nuovo accesso o recupero password."
+            _clear_auth_query_params()
+            st.rerun()
+
+        redirect_type = _query_param("type").lower()
+        if redirect_type == "recovery":
+            session = getattr(resp, "session", None)
+            if session:
+                st.session_state[_KEY_SESSION] = session
+            st.session_state[_KEY_PUBLIC_VIEW] = "reset_password"
+            st.session_state[_KEY_AUTH_NOTICE] = "Link verificato. Ora scegli una nuova password."
+            _clear_auth_query_params()
+            st.rerun()
+
+        _store_supabase_session(resp)
+        st.session_state[_KEY_AUTH_NOTICE] = "Email confermata. Accesso effettuato."
+        _clear_auth_query_params()
+        st.rerun()
+    except Exception as exc:
+        st.session_state[_KEY_PUBLIC_VIEW] = "login"
+        st.session_state[_KEY_AUTH_NOTICE] = _friendly_auth_redirect_error(str(exc))
+        _clear_auth_query_params()
+        st.rerun()
+    return True
+
+
+def _friendly_auth_redirect_error(message: str) -> str:
+    msg = (message or "").lower()
+    if "otp_expired" in msg or "expired" in msg:
+        return "Il link e scaduto. Richiedi una nuova email e aprila dal dispositivo dove usi PricePilot."
+    if "access_denied" in msg:
+        return "Link non valido o gia usato. Richiedi una nuova email."
+    return f"Non siamo riusciti a completare l'autenticazione: {message}"
 
 
 def _inject_public_css():
@@ -1129,6 +1430,9 @@ def _render_auth_panel(client, view: str):
                 f'<div class="pp-auth-copy">{_auth_copy(view)}</div>',
                 unsafe_allow_html=True,
             )
+            notice = st.session_state.pop(_KEY_AUTH_NOTICE, "")
+            if notice:
+                st.info(notice)
 
             if view == "login":
                 login_email = st.text_input("Email", key="auth_login_email", placeholder="mario@esempio.it")
@@ -1150,6 +1454,24 @@ def _render_auth_panel(client, view: str):
                 if st.button("Torna al login", key="forgot_to_login", use_container_width=True):
                     _go_public("login")
 
+            elif view == "reset_password":
+                new_pw = st.text_input(
+                    "Nuova password",
+                    key="auth_reset_new_pw",
+                    type="password",
+                    placeholder="Minimo 6 caratteri",
+                )
+                confirm_pw = st.text_input(
+                    "Conferma password",
+                    key="auth_reset_confirm_pw",
+                    type="password",
+                    placeholder="Ripeti la nuova password",
+                )
+                if st.button("Aggiorna password", key="auth_update_pw_btn", use_container_width=True, type="primary"):
+                    _do_update_password(client, new_pw, confirm_pw)
+                if st.button("Torna al login", key="reset_to_login", use_container_width=True):
+                    _go_public("login")
+
             else:
                 signup_email = st.text_input("Email", key="auth_signup_email", placeholder="mario@esempio.it")
                 signup_name = st.text_input("Nome attivita", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
@@ -1161,20 +1483,162 @@ def _render_auth_panel(client, view: str):
                     key="auth_signup_plan",
                 )
                 st.session_state[_KEY_SELECTED_PLAN] = selected_plan
+                if _signup_plan_requires_checkout(selected_plan):
+                    st.info(
+                        "Il piano scelto verra attivato dopo il checkout. "
+                        "Intanto l'account parte dal piano Free.",
+                        icon="!",
+                    )
                 signup_pw = st.text_input(
                     "Password",
                     key="auth_signup_pw",
                     type="password",
                     placeholder="Minimo 6 caratteri",
                 )
+                terms_ok = st.checkbox(
+                    "Accetto Termini di servizio e Privacy Policy di PricePilot.",
+                    key="auth_signup_terms_ok",
+                )
+                marketing_ok = st.checkbox(
+                    "Voglio ricevere aggiornamenti di prodotto e comunicazioni commerciali.",
+                    key="auth_signup_marketing_ok",
+                    help="Facoltativo. Non serve per creare l'account.",
+                )
+                st.caption(
+                    f"Versioni documenti: Termini {TERMS_VERSION}, Privacy {PRIVACY_VERSION}."
+                )
+                legal_col_1, legal_col_2 = st.columns(2)
+                with legal_col_1:
+                    if st.button("Leggi Termini", key="auth_read_terms", use_container_width=True):
+                        _go_public("terms")
+                with legal_col_2:
+                    if st.button("Leggi Privacy", key="auth_read_privacy", use_container_width=True):
+                        _go_public("privacy")
                 if st.button("Crea account", key="auth_signup_btn", use_container_width=True, type="primary"):
-                    _do_signup(client, signup_email, signup_pw, signup_name, selected_plan)
+                    _do_signup(
+                        client,
+                        signup_email,
+                        signup_pw,
+                        signup_name,
+                        selected_plan,
+                        terms_accepted=terms_ok,
+                        marketing_accepted=marketing_ok,
+                    )
                 if st.button("Hai gia un account? Accedi", key="register_to_login", use_container_width=True):
                     _go_public("login")
 
-            auth_label = "Supabase" if client else "locale"
+            auth_label = "Supabase" if client else "sviluppo locale"
+            if client is None and not _local_auth_allowed():
+                st.warning(
+                    "Supabase non e configurato. In produzione il login locale e disattivato.",
+                    icon="!",
+                )
             st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
             if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
+                _go_public("landing")
+
+
+def _render_legal_page(view: str):
+    _reset_auth_scroll()
+
+    is_terms = view == "terms"
+    title = "Termini di servizio" if is_terms else "Privacy Policy"
+    version = TERMS_VERSION if is_terms else PRIVACY_VERSION
+    back_label = "Torna alla registrazione"
+
+    _, col, _ = st.columns([0.7, 2.2, 0.7])
+    with col:
+        st.markdown(
+            f'<span class="pp-plan-pill">Versione {version}</span>'
+            f'<div class="pp-auth-title">{title}</div>',
+            unsafe_allow_html=True,
+        )
+        if is_terms:
+            st.markdown(
+                """
+                ### 1. Oggetto del servizio
+                PricePilot e una piattaforma software per supportare host e property manager
+                nella gestione dei prezzi per affitti brevi. Il servizio puo generare
+                suggerimenti, notifiche e, nei piani abilitati, flussi di approvazione o
+                automazione dei prezzi.
+
+                ### 2. Account e responsabilita dell'utente
+                L'utente e responsabile della correttezza dei dati inseriti, delle credenziali
+                di accesso e delle impostazioni applicate alle proprie proprieta. Le decisioni
+                operative sulle OTA restano sotto la responsabilita dell'utente, salvo diverse
+                condizioni contrattuali future.
+
+                ### 3. Suggerimenti e automazioni
+                I prezzi proposti da PricePilot sono basati sui dati disponibili, sulle regole
+                impostate e sulle integrazioni collegate. I suggerimenti non garantiscono un
+                risultato economico specifico. Nei piani Plus e Pro l'automazione deve rispettare
+                guardrail e impostazioni definite dall'account.
+
+                ### 4. Integrazioni esterne
+                Funzioni come OTA, channel manager, Telegram, pagamenti e provider dati possono
+                dipendere da servizi terzi. Interruzioni, limiti API o errori dei servizi esterni
+                possono influenzare il funzionamento di PricePilot.
+
+                ### 5. Uso corretto
+                L'utente si impegna a non usare PricePilot per attivita illegali, accessi non
+                autorizzati, manipolazione di dati altrui o violazione dei termini delle OTA e
+                dei provider collegati.
+
+                ### 6. Modifiche al servizio
+                PricePilot puo evolvere funzionalita, piani, prezzi e limiti operativi. Le
+                modifiche rilevanti saranno comunicate agli utenti secondo i canali disponibili.
+
+                ### 7. Nota
+                Questo testo e una base operativa da validare prima della pubblicazione
+                commerciale definitiva.
+                """
+            )
+        else:
+            st.markdown(
+                """
+                ### 1. Dati raccolti
+                PricePilot puo trattare dati di account come email, nome attivita, proprieta,
+                impostazioni di prezzo, preferenze Telegram, log operativi e informazioni
+                necessarie al funzionamento del servizio.
+
+                ### 2. Finalita
+                I dati sono usati per creare l'account, autenticare l'utente, gestire proprieta
+                e piani, generare raccomandazioni prezzo, inviare notifiche, registrare consensi
+                e mantenere sicurezza e storico operativo.
+
+                ### 3. Base del trattamento
+                I trattamenti principali servono all'esecuzione del servizio richiesto
+                dall'utente. Le comunicazioni commerciali sono facoltative e richiedono consenso
+                separato.
+
+                ### 4. Servizi terzi
+                PricePilot puo usare provider esterni come Supabase per autenticazione/database,
+                Telegram per notifiche, provider di pagamento e future integrazioni OTA/channel
+                manager. Ogni integrazione puo comportare il trasferimento dei dati necessari
+                al suo funzionamento.
+
+                ### 5. Conservazione e sicurezza
+                I dati sono conservati per il tempo necessario a fornire il servizio, rispettare
+                obblighi tecnici o legali e proteggere account e sistemi. L'accesso ai dati e
+                limitato tramite autenticazione e policy multi-tenant.
+
+                ### 6. Diritti dell'utente
+                L'utente puo richiedere accesso, rettifica, cancellazione o limitazione dei dati
+                secondo la normativa applicabile. Prima della vendita pubblica va indicato un
+                contatto privacy ufficiale.
+
+                ### 7. Nota
+                Questo testo e una base operativa da validare prima della pubblicazione
+                commerciale definitiva.
+                """
+            )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button(back_label, key=f"legal_{view}_register", use_container_width=True, type="primary"):
+                _go_public("register")
+        with c2:
+            if st.button("Torna alla home", key=f"legal_{view}_home", use_container_width=True):
                 _go_public("landing")
 
 
@@ -1182,6 +1646,7 @@ def _auth_title(view: str) -> str:
     return {
         "login": "Accedi alla dashboard",
         "forgot": "Recupera password",
+        "reset_password": "Scegli una nuova password",
         "register": "Crea il tuo account",
     }.get(view, "Crea il tuo account")
 
@@ -1190,6 +1655,7 @@ def _auth_copy(view: str) -> str:
     return {
         "login": "Bentornato. Entra nella dashboard per gestire proprieta, decisioni e prezzi.",
         "forgot": "Inserisci la tua email. Con Supabase collegato riceverai il link di recupero.",
+        "reset_password": "Il link di recupero e stato verificato. Imposta una password nuova e sicura.",
         "register": "Scegli il piano, crea l account e completa il setup della prima proprieta.",
     }.get(view, "")
 
@@ -1201,6 +1667,9 @@ def _do_login(client, email: str, password: str):
         st.error("Inserisci email e password.")
         return
     if client is None:
+        if not _local_auth_allowed():
+            st.error("Accesso non disponibile: configura Supabase per usare PricePilot in produzione.")
+            return
         _do_local_login(email, password)
         return
     try:
@@ -1212,7 +1681,16 @@ def _do_login(client, email: str, password: str):
         _handle_auth_error(exc, context="login")
 
 
-def _do_signup(client, email: str, password: str, account_name: str = "", plan: str = "free"):
+def _do_signup(
+    client,
+    email: str,
+    password: str,
+    account_name: str = "",
+    plan: str = "free",
+    *,
+    terms_accepted: bool = False,
+    marketing_accepted: bool = False,
+):
     email = (email or "").strip().lower()
     password = (password or "").strip()
     if not email or not password:
@@ -1221,33 +1699,67 @@ def _do_signup(client, email: str, password: str, account_name: str = "", plan: 
     if len(password) < 6:
         st.error("La password deve avere almeno 6 caratteri.")
         return
+    if not terms_accepted:
+        st.error("Per creare l'account devi accettare Termini di servizio e Privacy Policy.")
+        return
     if client is None:
-        _do_local_signup(email, password, account_name, plan)
+        if not _local_auth_allowed():
+            st.error("Registrazione non disponibile: configura Supabase per usare PricePilot in produzione.")
+            return
+        _do_local_signup(
+            email,
+            password,
+            account_name,
+            plan,
+            terms_accepted=terms_accepted,
+            marketing_accepted=marketing_accepted,
+        )
         return
     try:
         selected_plan = normalize_plan(plan)
+        account_plan = _account_plan_for_signup(selected_plan)
+        consented_at = datetime.utcnow().isoformat()
         resp = client.auth.sign_up({
             "email": email,
             "password": password,
             "options": {
+                "redirect_to": _auth_redirect_url(),
+                "email_redirect_to": _auth_redirect_url(),
                 "data": {
                     "account_name": account_name or "La mia attivita",
-                    "plan": selected_plan,
+                    "plan": account_plan,
+                    "requested_plan": selected_plan,
+                    "billing_required": selected_plan != account_plan,
+                    "terms_accepted": bool(terms_accepted),
+                    "privacy_accepted": True,
+                    "marketing_accepted": bool(marketing_accepted),
+                    "terms_version": TERMS_VERSION,
+                    "privacy_version": PRIVACY_VERSION,
+                    "consented_at": consented_at,
                 }
             },
         })
         user = getattr(resp, "user", None)
         session = getattr(resp, "session", None)
         if user and getattr(user, "id", None) and session:
-            _store_supabase_session(resp, account_name=account_name, plan=selected_plan)
+            _store_supabase_session(resp, account_name=account_name, plan=account_plan)
             st.success("Account creato.")
             st.rerun()
         elif user and getattr(user, "id", None):
-            _ensure_external_user(
+            local_user = _ensure_external_user(
                 email=getattr(user, "email", email),
                 external_user_id=getattr(user, "id", ""),
-                plan=selected_plan,
+                plan=account_plan,
                 account_name=account_name,
+            )
+            _record_signup_consent(
+                local_user,
+                terms_accepted=terms_accepted,
+                marketing_accepted=marketing_accepted,
+                accepted_at=consented_at,
+                source="signup_pending_email",
+                supabase_user_id=str(getattr(user, "id", "") or ""),
+                sync_remote=False,
             )
             st.info("Registrazione completata. Controlla la email e poi accedi.")
         else:
@@ -1259,17 +1771,73 @@ def _do_signup(client, email: str, password: str, account_name: str = "", plan: 
 def _store_supabase_session(resp, account_name: str = "", plan: str | None = None):
     user = getattr(resp, "user", None)
     session = getattr(resp, "session", None)
+    if session:
+        st.session_state[_KEY_SESSION] = session
     if user:
         metadata = getattr(user, "user_metadata", {}) or {}
+        account_plan = _account_plan_for_signup(plan or metadata.get("plan") or _selected_plan())
         local_user = _ensure_external_user(
             email=getattr(user, "email", ""),
             external_user_id=getattr(user, "id", ""),
-            plan=plan or metadata.get("plan") or _selected_plan(),
+            plan=account_plan,
             account_name=account_name or metadata.get("account_name", ""),
         )
         _set_local_session(local_user)
-    if session:
-        st.session_state[_KEY_SESSION] = session
+        if local_user:
+            _queue_auth_cookie(create_auth_session(int(local_user["id"])))
+        account = get_account(int((local_user or {}).get("account_id") or 1))
+        sync_account_membership_to_supabase(
+            account or {},
+            local_user or {},
+            str(getattr(user, "id", "") or ""),
+        )
+        _record_signup_consent(
+            local_user,
+            terms_accepted=bool(metadata.get("terms_accepted")),
+            marketing_accepted=bool(metadata.get("marketing_accepted")),
+            accepted_at=metadata.get("consented_at") or "",
+            source="supabase_login",
+            supabase_user_id=str(getattr(user, "id", "") or ""),
+            sync_remote=True,
+            only_if_missing=True,
+        )
+
+
+def _record_signup_consent(
+    local_user: dict | None,
+    *,
+    terms_accepted: bool,
+    marketing_accepted: bool,
+    accepted_at: str = "",
+    source: str = "signup",
+    supabase_user_id: str = "",
+    sync_remote: bool = True,
+    only_if_missing: bool = False,
+) -> dict | None:
+    if not local_user or not terms_accepted:
+        return None
+
+    user_id = int(local_user.get("id") or 0)
+    account_id = int(local_user.get("account_id") or 1)
+    existing = get_latest_user_consent(user_id) if only_if_missing else None
+    if existing and existing.get("terms_accepted") and existing.get("privacy_accepted"):
+        consent = existing
+    else:
+        consent = record_user_consent(
+            user_id,
+            account_id,
+            terms_accepted=True,
+            privacy_accepted=True,
+            marketing_accepted=bool(marketing_accepted),
+            terms_version=TERMS_VERSION,
+            privacy_version=PRIVACY_VERSION,
+            source=source,
+            accepted_at=accepted_at or None,
+        )
+
+    if sync_remote and supabase_user_id and consent:
+        sync_user_consent_to_supabase(consent, supabase_user_id)
+    return consent
 
 
 def _hash_password(password: str) -> str:
@@ -1318,19 +1886,37 @@ def _do_local_login(email: str, password: str):
         return
     update_user(int(user["id"]), {"last_login_at": datetime.utcnow().isoformat()})
     _set_local_session(user)
+    _queue_auth_cookie(create_auth_session(int(user["id"])))
     st.success("Accesso effettuato.")
     st.rerun()
 
 
-def _do_local_signup(email: str, password: str, account_name: str = "", plan: str = "free"):
+def _do_local_signup(
+    email: str,
+    password: str,
+    account_name: str = "",
+    plan: str = "free",
+    *,
+    terms_accepted: bool = False,
+    marketing_accepted: bool = False,
+):
     try:
+        account_plan = _account_plan_for_signup(plan)
         result = create_account_owner(
             email=email,
             password_hash=_hash_password(password),
             account_name=account_name or "La mia attivita",
-            plan=plan,
+            plan=account_plan,
+        )
+        _record_signup_consent(
+            result.get("user"),
+            terms_accepted=terms_accepted,
+            marketing_accepted=marketing_accepted,
+            source="local_signup",
+            sync_remote=False,
         )
         _set_local_session(result["user"])
+        _queue_auth_cookie(create_auth_session(int(result["user"]["id"])))
         st.success("Account creato. Benvenuto in PricePilot.")
         st.rerun()
     except ValueError as exc:
@@ -1357,7 +1943,11 @@ def _ensure_external_user(
         })
         return get_user_by_email(email)
 
-    account = create_account(account_name or "La mia attivita", plan=normalize_plan(plan), billing_status="dev")
+    account = create_account(
+        account_name or "La mia attivita",
+        plan=_account_plan_for_signup(plan),
+        billing_status="dev",
+    )
     user = create_user(
         int(account["id"]),
         email=email,
@@ -1378,13 +1968,47 @@ def _do_password_reset(client, email: str):
         st.error("Inserisci la tua email.")
         return
     if client is None:
-        st.info("Recupero password email disponibile quando collegheremo Supabase/SMTP. In locale puoi creare un nuovo account di test.")
+        if not _local_auth_allowed():
+            st.error("Recupero password non disponibile: configura Supabase in produzione.")
+            return
+        st.info("Recupero password via email disponibile con Supabase configurato. In sviluppo locale puoi creare un nuovo account di test.")
         return
     try:
-        client.auth.reset_password_email(email)
+        redirect_to = _password_reset_redirect_url()
+        options = {"redirect_to": redirect_to} if redirect_to else {}
+        if hasattr(client.auth, "reset_password_for_email"):
+            client.auth.reset_password_for_email(email, options)
+        else:
+            client.auth.reset_password_email(email)
         st.success("Ti abbiamo inviato il link di recupero password.")
     except Exception as exc:
         _handle_auth_error(exc, context="recupero password")
+
+
+def _do_update_password(client, password: str, confirm_password: str):
+    password = (password or "").strip()
+    confirm_password = (confirm_password or "").strip()
+    if client is None:
+        st.error("Aggiornamento password non disponibile: configura Supabase.")
+        return
+    if len(password) < 6:
+        st.error("La password deve avere almeno 6 caratteri.")
+        return
+    if password != confirm_password:
+        st.error("Le password non coincidono.")
+        return
+    try:
+        user_resp = client.auth.update_user({"password": password})
+        session = client.auth.get_session() if hasattr(client.auth, "get_session") else None
+        resp = SimpleNamespace(
+            user=getattr(user_resp, "user", None) or getattr(session, "user", None),
+            session=session,
+        )
+        _store_supabase_session(resp)
+        st.success("Password aggiornata. Accesso effettuato.")
+        st.rerun()
+    except Exception as exc:
+        _handle_auth_error(exc, context="aggiornamento password")
 
 
 def _handle_auth_error(exc: Exception, context: str = ""):
@@ -1395,7 +2019,7 @@ def _handle_auth_error(exc: Exception, context: str = ""):
         st.warning("Conferma la tua email prima di accedere.")
     elif "already registered" in msg:
         st.error("Esiste gia un account con questa email. Usa Accedi.")
-    elif "rate limit" in msg:
-        st.error("Troppi tentativi. Riprova tra qualche minuto.")
+    elif "rate limit" in msg or "security purposes" in msg or "request this after" in msg:
+        st.error("Troppi tentativi ravvicinati. Aspetta circa un minuto e riprova.")
     else:
         st.error(f"Errore durante la {context}: {exc}")

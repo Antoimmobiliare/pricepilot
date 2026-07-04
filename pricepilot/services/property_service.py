@@ -12,6 +12,7 @@ from pricepilot.core.database import (
 from pricepilot.models.property import Property, SYNC_MODES, PLATFORMS
 from pricepilot.core.plans import PLANS, effective_sync_mode, get_plan_limit, normalize_plan
 from pricepilot.services.supabase_repository import (
+    backfill_account_properties_to_supabase,
     delete_property_from_supabase,
     refresh_properties_from_supabase,
     sync_property_and_pricing_to_supabase,
@@ -28,7 +29,9 @@ def list_properties(account_id: Optional[int] = None) -> List[Dict]:
     props = get_properties()
     if account_id is None:
         return props
-    return [p for p in props if int(p.get("account_id") or 1) == int(account_id)]
+    scoped = [p for p in props if int(p.get("account_id") or 1) == int(account_id)]
+    backfill_account_properties_to_supabase(int(account_id), scoped)
+    return scoped
 
 
 def get_property_by_id(prop_id: int, account_id: Optional[int] = None) -> Optional[Dict]:
@@ -126,8 +129,11 @@ def _validate(data: Dict) -> None:
 
 def _enforce_property_limit(data: Dict) -> None:
     account_id = int(data.get("account_id") or 1)
-    account = get_account(account_id) or {"plan": data.get("plan", "free")}
+    account = get_account(account_id) or {"plan": data.get("plan", "free"), "billing_status": "dev"}
+    billing_status = str(account.get("billing_status") or "dev").lower()
     plan = account.get("plan") or data.get("plan", "free")
+    if billing_status not in {"active", "trialing", "dev"}:
+        plan = "free"
     max_properties = int(get_plan_limit(plan, "max_properties", 1))
     current_count = sum(
         1 for p in get_properties()

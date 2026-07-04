@@ -3,6 +3,8 @@ PricePilot - Database Manager
 Gestione SQLite con schema completo per storico decisioni,
 competitor, eventi e snapshot di mercato.
 """
+import hashlib
+import secrets
 import sqlite3
 import json
 from datetime import datetime, date, timedelta
@@ -82,6 +84,36 @@ def init_db() -> None:
             last_login_at TEXT,
             created_at TEXT    NOT NULL,
             updated_at TEXT    NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            token_hash  TEXT    NOT NULL UNIQUE,
+            expires_at  TEXT    NOT NULL,
+            revoked_at  TEXT,
+            created_at  TEXT    NOT NULL,
+            updated_at  TEXT    NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_token
+            ON auth_sessions(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_user
+            ON auth_sessions(user_id, expires_at);
+
+        CREATE TABLE IF NOT EXISTS user_consents (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id         INTEGER NOT NULL,
+            user_id            INTEGER NOT NULL,
+            terms_accepted     INTEGER NOT NULL DEFAULT 0,
+            privacy_accepted   INTEGER NOT NULL DEFAULT 0,
+            marketing_accepted INTEGER NOT NULL DEFAULT 0,
+            terms_version      TEXT    NOT NULL DEFAULT '2026-06-23',
+            privacy_version    TEXT    NOT NULL DEFAULT '2026-06-23',
+            source             TEXT    NOT NULL DEFAULT 'signup',
+            accepted_at        TEXT    NOT NULL,
+            created_at         TEXT    NOT NULL,
+            updated_at         TEXT    NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS decision_log (
@@ -231,6 +263,29 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_telegram_property
             ON telegram_links(property_id);
 
+        CREATE TABLE IF NOT EXISTS telegram_approvals (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp           TEXT    NOT NULL,
+            account_id          INTEGER NOT NULL DEFAULT 1,
+            property_id         INTEGER,
+            decision_log_id     INTEGER NOT NULL,
+            telegram_link_id    INTEGER,
+            chat_id             INTEGER,
+            telegram_username   TEXT    DEFAULT '',
+            action              TEXT    NOT NULL,
+            status              TEXT    NOT NULL,
+            source              TEXT    NOT NULL DEFAULT 'telegram',
+            message_id          TEXT    DEFAULT '',
+            callback_query_id   TEXT    DEFAULT '',
+            error               TEXT    DEFAULT '',
+            payload             TEXT    DEFAULT '{}'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_approvals_account
+            ON telegram_approvals(account_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_telegram_approvals_decision
+            ON telegram_approvals(decision_log_id);
+
         CREATE TABLE IF NOT EXISTS property_integrations (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             property_id INTEGER NOT NULL,
@@ -322,6 +377,9 @@ def init_db() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_notification_log_account
             ON notification_log(account_id, timestamp);
+
+        CREATE INDEX IF NOT EXISTS idx_user_consents_user
+            ON user_consents(user_id, accepted_at);
         """)
 
     # ── Migrazioni sicure (ADD COLUMN se colonna mancante) ────────────────────
@@ -349,6 +407,55 @@ def init_db() -> None:
         ]:
             if _col not in cols_u:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {_col} {_typ}")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_consents (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id         INTEGER NOT NULL,
+                user_id            INTEGER NOT NULL,
+                terms_accepted     INTEGER NOT NULL DEFAULT 0,
+                privacy_accepted   INTEGER NOT NULL DEFAULT 0,
+                marketing_accepted INTEGER NOT NULL DEFAULT 0,
+                terms_version      TEXT    NOT NULL DEFAULT '2026-06-23',
+                privacy_version    TEXT    NOT NULL DEFAULT '2026-06-23',
+                source             TEXT    NOT NULL DEFAULT 'signup',
+                accepted_at        TEXT    NOT NULL,
+                created_at         TEXT    NOT NULL,
+                updated_at         TEXT    NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_consents_user "
+            "ON user_consents(user_id, accepted_at)"
+        )
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_approvals (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp           TEXT    NOT NULL,
+                account_id          INTEGER NOT NULL DEFAULT 1,
+                property_id         INTEGER,
+                decision_log_id     INTEGER NOT NULL,
+                telegram_link_id    INTEGER,
+                chat_id             INTEGER,
+                telegram_username   TEXT    DEFAULT '',
+                action              TEXT    NOT NULL,
+                status              TEXT    NOT NULL,
+                source              TEXT    NOT NULL DEFAULT 'telegram',
+                message_id          TEXT    DEFAULT '',
+                callback_query_id   TEXT    DEFAULT '',
+                error               TEXT    DEFAULT '',
+                payload             TEXT    DEFAULT '{}'
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_telegram_approvals_account "
+            "ON telegram_approvals(account_id, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_telegram_approvals_decision "
+            "ON telegram_approvals(decision_log_id)"
+        )
 
         # --- properties ---
         cols_p = {r[1] for r in conn.execute("PRAGMA table_info(properties)").fetchall()}
@@ -794,6 +901,132 @@ def update_user(user_id: int, data: Dict) -> Optional[Dict]:
     return get_user(user_id)
 
 
+def _auth_session_hash(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def create_auth_session(user_id: int, ttl_days: int = 14) -> str:
+    """Crea una sessione persistente locale e ritorna il token raw per il cookie."""
+    user_id = int(user_id or 0)
+    if user_id <= 0:
+        raise ValueError("User id non valido per la sessione.")
+    token = secrets.token_urlsafe(40)
+    now = datetime.utcnow()
+    expires_at = (now + timedelta(days=max(1, int(ttl_days or 14)))).isoformat()
+    now_iso = now.isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions
+                (user_id, token_hash, expires_at, revoked_at, created_at, updated_at)
+            VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            (user_id, _auth_session_hash(token), expires_at, now_iso, now_iso),
+        )
+    return token
+
+
+def get_user_by_auth_session(token: str) -> Optional[Dict]:
+    """Ritorna l'utente collegato a un cookie sessione ancora valido."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT u.*
+              FROM auth_sessions s
+              JOIN users u ON u.id = s.user_id
+             WHERE s.token_hash=?
+               AND s.revoked_at IS NULL
+               AND s.expires_at > ?
+             LIMIT 1
+            """,
+            (_auth_session_hash(token), now),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def revoke_auth_session(token: str) -> None:
+    """Revoca una sessione persistente locale."""
+    token = (token or "").strip()
+    if not token:
+        return
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE auth_sessions
+               SET revoked_at=?, updated_at=?
+             WHERE token_hash=? AND revoked_at IS NULL
+            """,
+            (now, now, _auth_session_hash(token)),
+        )
+
+
+def record_user_consent(
+    user_id: int,
+    account_id: int,
+    *,
+    terms_accepted: bool,
+    privacy_accepted: bool,
+    marketing_accepted: bool = False,
+    terms_version: str = "2026-06-23",
+    privacy_version: str = "2026-06-23",
+    source: str = "signup",
+    accepted_at: str | None = None,
+) -> Dict:
+    """Registra un'accettazione privacy/termini per audit SaaS."""
+    if not user_id:
+        raise ValueError("user_id obbligatorio per registrare il consenso.")
+    if not account_id:
+        raise ValueError("account_id obbligatorio per registrare il consenso.")
+
+    now = datetime.utcnow().isoformat()
+    accepted_at = accepted_at or now
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO user_consents
+                (account_id, user_id, terms_accepted, privacy_accepted,
+                 marketing_accepted, terms_version, privacy_version, source,
+                 accepted_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            int(account_id),
+            int(user_id),
+            1 if terms_accepted else 0,
+            1 if privacy_accepted else 0,
+            1 if marketing_accepted else 0,
+            terms_version or "2026-06-23",
+            privacy_version or "2026-06-23",
+            source or "signup",
+            accepted_at,
+            now,
+            now,
+        ))
+        consent_id = cur.lastrowid
+        row = conn.execute(
+            "SELECT * FROM user_consents WHERE id=?",
+            (consent_id,),
+        ).fetchone()
+    return dict(row) if row else {}
+
+
+def get_latest_user_consent(user_id: int) -> Optional[Dict]:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM user_consents
+             WHERE user_id=?
+             ORDER BY accepted_at DESC, id DESC
+             LIMIT 1
+            """,
+            (int(user_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_user(user_id: int) -> bool:
     user = get_user(user_id)
     if not user:
@@ -812,7 +1045,12 @@ def delete_user(user_id: int) -> bool:
 def get_effective_plan_for_property(prop: Dict) -> str:
     """Piano account-first, con fallback al piano legacy salvato sulla proprieta."""
     account = get_account(int(prop.get("account_id") or 1))
-    return (account or {}).get("plan") or prop.get("plan", "free")
+    if account:
+        status = str(account.get("billing_status") or "dev").lower()
+        if status not in {"active", "trialing", "dev"}:
+            return "free"
+        return account.get("plan") or prop.get("plan", "free")
+    return prop.get("plan", "free")
 
 
 DEFAULT_GUARDRAIL_POLICY = {
@@ -1747,6 +1985,71 @@ def get_all_telegram_links() -> List[Dict]:
 # ─────────────────────────────────────────────
 # PROPERTY INTEGRATIONS (Multi-OTA)
 # ─────────────────────────────────────────────
+
+def record_telegram_approval(entry: Dict) -> int:
+    """Registra un click Approva/Rifiuta arrivato da Telegram o dashboard."""
+    now = datetime.utcnow().isoformat()
+    payload = entry.get("payload") or {}
+    if isinstance(payload, str):
+        payload_json = payload
+    else:
+        payload_json = json.dumps(payload, ensure_ascii=False)
+
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO telegram_approvals
+                (timestamp, account_id, property_id, decision_log_id,
+                 telegram_link_id, chat_id, telegram_username, action, status,
+                 source, message_id, callback_query_id, error, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("timestamp") or now,
+            int(entry.get("account_id") or 1),
+            entry.get("property_id"),
+            int(entry.get("decision_log_id")),
+            entry.get("telegram_link_id"),
+            entry.get("chat_id"),
+            entry.get("telegram_username", ""),
+            entry.get("action", ""),
+            entry.get("status", ""),
+            entry.get("source", "telegram"),
+            str(entry.get("message_id", "") or ""),
+            str(entry.get("callback_query_id", "") or ""),
+            str(entry.get("error", "") or ""),
+            payload_json,
+        ))
+        return cur.lastrowid
+
+
+def get_telegram_approvals(
+    limit: int = 100,
+    account_id: Optional[int] = None,
+    property_id: Optional[int] = None,
+    decision_log_id: Optional[int] = None,
+) -> List[Dict]:
+    """Ritorna lo storico approvazioni/rifiuti Telegram e dashboard."""
+    query = """
+        SELECT ta.*, p.name AS property_name
+          FROM telegram_approvals ta
+          LEFT JOIN properties p ON p.id = ta.property_id
+         WHERE 1=1
+    """
+    params: list = []
+    if account_id is not None:
+        query += " AND ta.account_id=?"
+        params.append(int(account_id))
+    if property_id is not None:
+        query += " AND ta.property_id=?"
+        params.append(int(property_id))
+    if decision_log_id is not None:
+        query += " AND ta.decision_log_id=?"
+        params.append(int(decision_log_id))
+    query += " ORDER BY ta.timestamp DESC, ta.id DESC LIMIT ?"
+    params.append(int(limit))
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
 
 def get_property_integrations(property_id: int) -> List[Dict]:
     """Ritorna tutte le integrazioni OTA per una proprietà."""

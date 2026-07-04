@@ -28,14 +28,21 @@ from pricepilot.core.database import (
     get_notification_preferences, update_notification_preferences,
     get_notification_log,
     get_price_calendar, upsert_calendar_price,
+    get_telegram_approvals,
 )
+from pricepilot.core.supabase_client import is_supabase_configured
 from pricepilot.services.property_service import (
     list_properties, get_property_by_id, create_property,
     update_property, remove_property,
 )
 from pricepilot.engine.decision_engine import process_decision, approve_decision
 from pricepilot.core.scheduler import run_pricing_cycle
-from pricepilot.providers.registry import get_billing_provider, get_market_data_provider
+from pricepilot.providers.registry import (
+    get_billing_provider,
+    get_event_provider,
+    get_market_data_provider,
+    get_occupancy_provider,
+)
 from pricepilot.services.telegram_bot import (
     process_webhook as tg_process_webhook,
     create_property_link, get_webhook_info, set_webhook, is_configured,
@@ -49,7 +56,9 @@ from pricepilot.services.account_service import (
 from pricepilot.services.tenant_service import (
     API_KEY_HEADER,
     api_auth_required,
+    configured_api_keys,
     default_account_id,
+    production_mode,
     resolve_account_id_from_api_key,
 )
 
@@ -79,10 +88,12 @@ app.add_middleware(
 
 PUBLIC_PATHS = {
     "/health",
+    "/ready",
     "/docs",
     "/redoc",
     "/openapi.json",
     "/telegram/webhook",
+    "/stripe/webhook",
 }
 
 
@@ -115,6 +126,90 @@ def startup():
 @app.get("/health", tags=["System"], summary="Stato servizio")
 def api_health():
     return {"ok": True, "service": "pricepilot"}
+
+
+@app.get("/ready", tags=["System"], summary="Readiness deploy produzione")
+def api_readiness():
+    checks = _deployment_readiness_checks()
+    return {
+        "ok": all(item["ok"] for item in checks.values()),
+        "service": "pricepilot",
+        "environment": os.getenv("PRICEPILOT_ENV", "development"),
+        "checks": checks,
+    }
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _api_base_url() -> str:
+    for key in ("PRICEPILOT_API_BASE_URL", "APP_API_BASE_URL"):
+        value = os.getenv(key, "").strip().rstrip("/")
+        if value:
+            return value
+    return ""
+
+
+def _deployment_readiness_checks() -> dict:
+    prod = production_mode()
+    api_keys = configured_api_keys()
+    api_base_url = _api_base_url()
+    billing_provider = get_billing_provider()
+    market_provider = get_market_data_provider()
+    event_provider = get_event_provider()
+    occupancy_provider = get_occupancy_provider()
+    provider_names = {
+        "market": getattr(market_provider, "name", type(market_provider).__name__),
+        "events": getattr(event_provider, "name", type(event_provider).__name__),
+        "occupancy": getattr(occupancy_provider, "name", type(occupancy_provider).__name__),
+    }
+    demo_data = any(str(name).startswith("demo") for name in provider_names.values())
+    return {
+        "api_base_url": {
+            "ok": bool(api_base_url) or not prod,
+            "required": prod,
+            "detail": "PRICEPILOT_API_BASE_URL/APP_API_BASE_URL configurato" if api_base_url else "URL API pubblico mancante",
+        },
+        "api_auth": {
+            "ok": bool(api_keys) or not prod,
+            "required": prod,
+            "detail": "API key configurate" if api_keys else "API key mancanti",
+        },
+        "supabase": {
+            "ok": is_supabase_configured() or not prod,
+            "required": prod,
+            "detail": "Supabase configurato" if is_supabase_configured() else "Supabase non configurato",
+        },
+        "telegram_webhook_secret": {
+            "ok": bool(get_webhook_secret()) or not prod,
+            "required": prod,
+            "detail": "Telegram webhook secret configurato" if get_webhook_secret() else "Telegram webhook secret mancante",
+        },
+        "stripe_webhook_secret": {
+            "ok": bool(os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()) or not prod,
+            "required": prod,
+            "detail": "Stripe webhook secret configurato" if os.getenv("STRIPE_WEBHOOK_SECRET", "").strip() else "Stripe webhook secret mancante",
+        },
+        "billing_provider": {
+            "ok": bool(getattr(billing_provider, "is_billing_configured", lambda: False)()) or not prod,
+            "required": prod,
+            "detail": (
+                f"Billing configurato via {getattr(billing_provider, 'name', type(billing_provider).__name__)}"
+                if getattr(billing_provider, "is_billing_configured", lambda: False)()
+                else "Billing non configurato: imposta Stripe test/live prima della vendita"
+            ),
+        },
+        "data_providers": {
+            "ok": (not demo_data) or not prod,
+            "required": prod,
+            "detail": (
+                f"Provider dati: {provider_names}"
+                if not demo_data
+                else "Provider dati demo attivi: usa PRICEPILOT_DATA_PROVIDER=manual o API reali"
+            ),
+        },
+    }
 
 
 class PropertyCreate(BaseModel):
@@ -227,6 +322,21 @@ def api_update_account(body: AccountUpdate, request: Request):
     if not account:
         raise HTTPException(404, f"Account {account_id} not found")
     return account
+
+
+@app.post("/stripe/webhook", tags=["Billing"], include_in_schema=False)
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    provider = get_billing_provider()
+    process_webhook = getattr(provider, "process_webhook", None)
+    if not callable(process_webhook):
+        raise HTTPException(503, "Billing webhook non disponibile.")
+
+    result = process_webhook(payload=payload, signature=signature)
+    if not result.ok:
+        raise HTTPException(400, result.error or "Webhook Stripe non valido.")
+    return {"ok": True, "event_type": result.event_type, "account_id": result.account_id}
 
 
 @app.get("/account/users", tags=["Account"], summary="Utenti account")
@@ -449,7 +559,7 @@ def api_run_pricing_cycle(request: Request):
     account_id = _account_id(request)
     account = get_account(account_id) or {}
     if not get_billing_provider().can_run_manual_cycle(account=account, user=None):
-        raise HTTPException(403, "Il ciclo manuale e disponibile solo in dev/admin.")
+        raise HTTPException(403, "Il ciclo manuale e disponibile solo in test/admin.")
     return run_pricing_cycle(account_id=account_id, source="api_manual")
 
 
@@ -562,7 +672,7 @@ def api_market(
 async def telegram_webhook(request):
     """
     Endpoint per il webhook Telegram.
-    Configurare con: POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=<APP_BASE_URL>/telegram/webhook
+    Configurare con: POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=<PRICEPILOT_API_BASE_URL>/telegram/webhook
     """
     try:
         if webhook_secret_required() and not get_webhook_secret():
@@ -601,17 +711,44 @@ def api_telegram_status():
     }
 
 
+@app.get("/telegram/approvals", tags=["Telegram"], summary="Storico approvazioni Telegram")
+def api_telegram_approvals(
+    request: Request,
+    property_id: Optional[int] = Query(None),
+    limit: int = Query(100, le=500),
+):
+    account_id = _account_id(request)
+    if property_id is not None and not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, f"Property {property_id} not found")
+    return get_telegram_approvals(
+        limit=limit,
+        account_id=account_id,
+        property_id=property_id,
+    )
+
+
 @app.on_event("startup")
 def _register_webhook_if_needed():
-    """Registra il webhook Telegram all'avvio se APP_BASE_URL è impostato."""
-    import os
-    base_url = os.environ.get("APP_BASE_URL", "").strip()
-    if base_url and is_configured():
-        result = set_webhook(base_url)
-        if result.get("ok"):
-            print(f"✅ Telegram webhook registrato: {base_url}/telegram/webhook")
-        else:
-            print(f"⚠️  setWebhook fallito: {result.get('description', result)}")
+    """Registra il webhook Telegram solo quando il deploy API lo richiede."""
+    if not _env_flag("PRICEPILOT_AUTO_REGISTER_TELEGRAM_WEBHOOK"):
+        return
+    if not is_configured():
+        print("Telegram webhook non registrato: TELEGRAM_BOT_TOKEN mancante.")
+        return
+    if production_mode() and not get_webhook_secret():
+        print("Telegram webhook non registrato: TELEGRAM_WEBHOOK_SECRET mancante in produzione.")
+        return
+
+    base_url = _api_base_url()
+    if not base_url:
+        print("Telegram webhook non registrato: PRICEPILOT_API_BASE_URL mancante.")
+        return
+
+    result = set_webhook(base_url)
+    if result.get("ok"):
+        print(f"Telegram webhook registrato: {base_url}/telegram/webhook")
+    else:
+        print(f"setWebhook fallito: {result.get('description', result)}")
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────

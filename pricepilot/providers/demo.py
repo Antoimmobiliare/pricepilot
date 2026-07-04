@@ -13,7 +13,9 @@ from typing import Optional
 
 from pricepilot.core.plans import get_plan, normalize_plan
 from pricepilot.providers.contracts import (
+    BillingCheckoutResult,
     BillingPlanResult,
+    BillingWebhookResult,
     ChannelUpdateResult,
     MarketDataResult,
     OccupancyResult,
@@ -108,11 +110,17 @@ class DefaultChannelManagerProvider:
                 min_nights=min_nights,
             )
             raw = getattr(result, "raw", {}) or {}
+            is_stub = bool(raw.get("stub", False))
+            is_real = bool(raw.get("is_real", False)) or (
+                not is_stub
+                and bool(str(getattr(result, "listing_id", "") or ""))
+                and str(getattr(result, "listing_id", "") or "") != "stub"
+            )
             return ChannelUpdateResult(
                 ok=bool(getattr(result, "ok", False)),
                 platform=str(getattr(result, "platform", "") or ""),
                 listing_id=str(getattr(result, "listing_id", "") or ""),
-                is_real=bool(getattr(result, "ok", False) and not raw.get("stub", True)),
+                is_real=is_real,
                 error=str(getattr(result, "error", "") or ""),
                 raw=raw,
             )
@@ -133,7 +141,8 @@ class LocalBillingProvider:
         from pricepilot.core.database import get_account
 
         account = get_account(account_id) or {"plan": "free", "billing_status": "dev"}
-        plan = normalize_plan(account.get("plan"))
+        status = str(account.get("billing_status") or "dev").lower()
+        plan = normalize_plan(account.get("plan") if status in {"active", "trialing", "dev"} else "free")
         plan_info = get_plan(plan)
         return BillingPlanResult(
             plan=plan,
@@ -148,4 +157,50 @@ class LocalBillingProvider:
             str(account.get("billing_status", "")).lower() == "dev"
             or str(user.get("role", "")).lower() == "admin"
             or os.environ.get("PRICEPILOT_ALLOW_MANUAL_CYCLE", "").strip() == "1"
+        )
+
+    def is_billing_configured(self) -> bool:
+        return False
+
+    def create_checkout_session(
+        self,
+        *,
+        account_id: int,
+        plan: str,
+        success_url: str = "",
+        cancel_url: str = "",
+    ) -> BillingCheckoutResult:
+        plan = normalize_plan(plan)
+        return BillingCheckoutResult(
+            ok=False,
+            plan=plan,
+            provider=self.name,
+            error="Billing reale non configurato. Collega Stripe per attivare checkout e upgrade.",
+            raw={"account_id": account_id, "success_url": success_url, "cancel_url": cancel_url},
+        )
+
+    def create_customer_portal(
+        self,
+        *,
+        account_id: int,
+        return_url: str = "",
+    ) -> BillingCheckoutResult:
+        return BillingCheckoutResult(
+            ok=False,
+            provider=self.name,
+            error="Customer portal non configurato. Collega Stripe per gestire gli abbonamenti.",
+            raw={"account_id": account_id, "return_url": return_url},
+        )
+
+    def process_webhook(
+        self,
+        *,
+        payload: bytes,
+        signature: str = "",
+    ) -> BillingWebhookResult:
+        return BillingWebhookResult(
+            ok=False,
+            provider=self.name,
+            error="Billing webhook non disponibile senza Stripe configurato.",
+            raw={"payload_present": bool(payload), "signature_present": bool(signature)},
         )

@@ -31,9 +31,11 @@ def _get_adapter_registry() -> Dict[str, type]:
     """Importa gli adapter lazy (evita errori se mancano dipendenze opzionali)."""
     from pricepilot.integrations.airbnb  import AirbnbAdapter
     from pricepilot.integrations.booking import BookingAdapter
+    from pricepilot.integrations.smoobu  import SmoobuAdapter
     return {
         "airbnb":  AirbnbAdapter,
         "booking": BookingAdapter,
+        "smoobu":  SmoobuAdapter,
         # Aggiungi qui nuove piattaforme:
         # "vrbo":    VrboAdapter,
         # "direct":  DirectAdapter,
@@ -134,10 +136,7 @@ class ChannelManager:
         adapter = self.get_adapter(prop)
         if adapter is None:
             return False
-        platform = prop.get("platform", "airbnb").lower()
-        token    = _env_token_for_platform(platform)
-        listing  = prop.get("listing_id", "")
-        return bool(token and listing)
+        return bool(adapter.is_connected())
 
     def get_status(self, prop: Dict) -> Dict:
         """
@@ -147,9 +146,16 @@ class ChannelManager:
         platform   = prop.get("platform", "unknown")
         listing_id = prop.get("listing_id", "")
         token      = _env_token_for_platform(platform)
+        platform_l = str(platform or "").lower()
         is_real    = bool(token and listing_id)
         adapter    = self.get_adapter(prop)
         supported  = adapter is not None
+        auth_mode  = ""
+        if platform_l == "smoobu" and adapter is not None:
+            has_credentials = bool(getattr(adapter, "has_credentials", lambda: False)())
+            is_real = bool(adapter.is_connected())
+            auth_mode = str(getattr(adapter, "auth_mode", lambda: "")())
+            token = "configured" if has_credentials else ""
 
         return {
             "platform":   platform,
@@ -158,6 +164,7 @@ class ChannelManager:
             "is_real":    is_real,
             "mode":       "🟢 Live" if is_real else ("🟡 Stub" if supported else "🔴 Non supportato"),
             "token_set":  bool(token),
+            "auth_mode":  auth_mode,
         }
 
 
@@ -169,6 +176,7 @@ def _env_token_for_platform(platform: str) -> str:
         "airbnb":  "AIRBNB_API_TOKEN",
         "booking": "BOOKING_API_KEY",
         "vrbo":    "VRBO_API_KEY",
+        "smoobu":  "SMOOBU_API_KEY",
         "direct":  "",
         "other":   "",
     }

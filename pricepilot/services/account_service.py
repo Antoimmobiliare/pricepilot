@@ -25,6 +25,14 @@ from pricepilot.services.tenant_service import default_account_id
 
 
 ROLES = ("owner", "manager", "viewer")
+BILLING_MANAGED_FIELDS = {
+    "plan",
+    "billing_status",
+    "trial_ends_at",
+    "current_period_ends_at",
+    "stripe_customer_id",
+    "stripe_subscription_id",
+}
 
 ROLE_LABELS = {
     "owner": "Owner - gestisce account, piano, utenti e proprieta",
@@ -151,8 +159,11 @@ def remove_user(user_id: int, account_id: Optional[int] = None) -> bool:
 
 
 def update_account_profile(account_id: int, data: Dict) -> Optional[Dict]:
-    if "plan" in data:
-        data["plan"] = normalize_plan(data.get("plan"))
+    data = {
+        key: value
+        for key, value in (data or {}).items()
+        if key not in BILLING_MANAGED_FIELDS
+    }
     updated = update_account(account_id, data)
     if updated:
         record_audit_event(
@@ -162,7 +173,7 @@ def update_account_profile(account_id: int, data: Dict) -> Optional[Dict]:
             account_id=account_id,
             source="dashboard_or_api",
             status="ok",
-            details={"name": updated.get("name"), "plan": updated.get("plan")},
+            details={"name": updated.get("name")},
         )
     return updated
 

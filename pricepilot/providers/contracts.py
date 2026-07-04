@@ -45,6 +45,28 @@ class BillingPlanResult:
     raw: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class BillingCheckoutResult:
+    ok: bool
+    plan: str = "free"
+    provider: str = ""
+    url: str = ""
+    error: str = ""
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BillingWebhookResult:
+    ok: bool
+    provider: str = ""
+    event_type: str = ""
+    account_id: int = 0
+    plan: str = "free"
+    billing_status: str = ""
+    error: str = ""
+    raw: dict = field(default_factory=dict)
+
+
 class MarketDataProvider(Protocol):
     """Reads competitor/market signals for a property and date."""
 
@@ -106,4 +128,33 @@ class BillingProvider(Protocol):
         ...
 
     def can_run_manual_cycle(self, *, account: dict, user: Optional[dict] = None) -> bool:
+        ...
+
+    def is_billing_configured(self) -> bool:
+        ...
+
+    def create_checkout_session(
+        self,
+        *,
+        account_id: int,
+        plan: str,
+        success_url: str = "",
+        cancel_url: str = "",
+    ) -> BillingCheckoutResult:
+        ...
+
+    def create_customer_portal(
+        self,
+        *,
+        account_id: int,
+        return_url: str = "",
+    ) -> BillingCheckoutResult:
+        ...
+
+    def process_webhook(
+        self,
+        *,
+        payload: bytes,
+        signature: str = "",
+    ) -> BillingWebhookResult:
         ...

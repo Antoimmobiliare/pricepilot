@@ -6,6 +6,8 @@ the codebase reads providers through these getters.
 """
 from __future__ import annotations
 
+import os
+
 from pricepilot.providers.contracts import (
     BillingProvider,
     ChannelManagerProvider,
@@ -20,13 +22,52 @@ from pricepilot.providers.demo import (
     DemoOccupancyProvider,
     LocalBillingProvider,
 )
+from pricepilot.providers.manual import (
+    ManualEventProvider,
+    ManualMarketDataProvider,
+    ManualOccupancyProvider,
+)
+from pricepilot.providers.stripe_billing import StripeBillingProvider
 
 
-_market_data_provider: MarketDataProvider = DemoMarketDataProvider()
-_event_provider: EventProvider = DemoEventProvider()
-_occupancy_provider: OccupancyProvider = DemoOccupancyProvider()
+def _data_provider_mode() -> str:
+    return os.environ.get("PRICEPILOT_DATA_PROVIDER", "demo").strip().lower()
+
+
+def _default_market_data_provider() -> MarketDataProvider:
+    if _data_provider_mode() in {"manual", "csv", "manual_csv"}:
+        return ManualMarketDataProvider()
+    return DemoMarketDataProvider()
+
+
+def _default_event_provider() -> EventProvider:
+    if _data_provider_mode() in {"manual", "csv", "manual_csv"}:
+        return ManualEventProvider()
+    return DemoEventProvider()
+
+
+def _default_occupancy_provider() -> OccupancyProvider:
+    if _data_provider_mode() in {"manual", "csv", "manual_csv"}:
+        return ManualOccupancyProvider()
+    return DemoOccupancyProvider()
+
+
+_market_data_provider: MarketDataProvider = _default_market_data_provider()
+_event_provider: EventProvider = _default_event_provider()
+_occupancy_provider: OccupancyProvider = _default_occupancy_provider()
 _channel_manager_provider: ChannelManagerProvider = DefaultChannelManagerProvider()
-_billing_provider: BillingProvider = LocalBillingProvider()
+
+def _default_billing_provider() -> BillingProvider:
+    stripe_env_present = any(
+        os.environ.get(key, "").strip()
+        for key in ("STRIPE_SECRET_KEY", "STRIPE_PRICE_PLUS", "STRIPE_PRICE_PRO")
+    )
+    if stripe_env_present:
+        return StripeBillingProvider()
+    return LocalBillingProvider()
+
+
+_billing_provider: BillingProvider = _default_billing_provider()
 
 
 def get_market_data_provider() -> MarketDataProvider:
@@ -81,8 +122,8 @@ def reset_providers() -> None:
     global _channel_manager_provider
     global _billing_provider
 
-    _market_data_provider = DemoMarketDataProvider()
-    _event_provider = DemoEventProvider()
-    _occupancy_provider = DemoOccupancyProvider()
+    _market_data_provider = _default_market_data_provider()
+    _event_provider = _default_event_provider()
+    _occupancy_provider = _default_occupancy_provider()
     _channel_manager_provider = DefaultChannelManagerProvider()
-    _billing_provider = LocalBillingProvider()
+    _billing_provider = _default_billing_provider()

@@ -82,7 +82,12 @@ def verify_webhook_secret(header_value: str | None) -> bool:
 
 # ─── Chiamate API Telegram (via urllib, zero dipendenze) ─────────────────────
 
-def _api_call(method: str, payload: Dict[str, Any]) -> Dict:
+def _api_call(
+    method: str,
+    payload: Dict[str, Any],
+    *,
+    request_timeout: int = 10,
+) -> Dict:
     """Esegue una chiamata all'API Telegram Bot."""
     token = get_bot_token()
     if not token:
@@ -96,10 +101,13 @@ def _api_call(method: str, payload: Dict[str, Any]) -> Dict:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=request_timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
+        if e.code == 400 and "message is not modified" in body.lower():
+            logger.info("Telegram edit ignorato: messaggio gia aggiornato.")
+            return {"ok": True, "ignored": "message_not_modified", "description": body}
         logger.error(f"Telegram HTTP {e.code}: {body}")
         return {"ok": False, "error": body}
     except Exception as exc:
@@ -343,7 +351,7 @@ def _decision_context_for_chat(log_id: int, chat_id: int) -> Optional[Dict]:
         if not row:
             return None
         link = conn.execute("""
-            SELECT id FROM telegram_links
+            SELECT id, telegram_username FROM telegram_links
             WHERE property_id=? AND chat_id=? AND active=1
             ORDER BY id DESC LIMIT 1
         """, (row["property_id"], chat_id)).fetchone()
@@ -353,7 +361,43 @@ def _decision_context_for_chat(log_id: int, chat_id: int) -> Optional[Dict]:
         "id": int(row["id"]),
         "account_id": int(row["account_id"] or 1),
         "property_id": int(row["property_id"]),
+        "telegram_link_id": int(link["id"]),
+        "telegram_username": link["telegram_username"] or "",
     }
+
+
+def _record_approval_event(
+    *,
+    context: Dict,
+    action: str,
+    status: str,
+    chat_id: int,
+    message_id: int,
+    callback_query_id: str,
+    payload: Optional[Dict] = None,
+    error: str = "",
+) -> None:
+    """Best-effort audit trail for Telegram approval/reject clicks."""
+    try:
+        from pricepilot.core.database import record_telegram_approval
+
+        record_telegram_approval({
+            "account_id": context["account_id"],
+            "property_id": context["property_id"],
+            "decision_log_id": context["id"],
+            "telegram_link_id": context.get("telegram_link_id"),
+            "chat_id": chat_id,
+            "telegram_username": context.get("telegram_username", ""),
+            "action": action,
+            "status": status,
+            "source": "telegram",
+            "message_id": message_id,
+            "callback_query_id": callback_query_id,
+            "error": error,
+            "payload": payload or {},
+        })
+    except Exception as exc:
+        logger.warning("Storico approvazione Telegram non salvato: %s", exc)
 
 
 def _handle_callback(
@@ -374,16 +418,40 @@ def _handle_callback(
             answer_callback_query(callback_query_id, "❌ ID decisione non valido")
             return
 
+        if "*APPROVATO*" in original_text or "*RIFIUTATO*" in original_text:
+            answer_callback_query(callback_query_id, "Decisione gia gestita.")
+            return
+
         context = _decision_context_for_chat(log_id, chat_id)
         if not context:
             answer_callback_query(callback_query_id, "Decisione non disponibile per questa chat")
             return
 
         result = approve_decision(log_id, account_id=context["account_id"])
-        answer_callback_query(callback_query_id, "Prezzo approvato. Sincronizzalo manualmente sul canale.")
+        _record_approval_event(
+            context=context,
+            action="approve",
+            status=result.get("status", "approved"),
+            chat_id=chat_id,
+            message_id=message_id,
+            callback_query_id=callback_query_id,
+            payload=result,
+            error="" if result.get("approved") else result.get("message", ""),
+        )
+        if result.get("applied"):
+            callback_text = "Prezzo approvato e sincronizzato."
+            final_line = "*APPROVATO* - prezzo sincronizzato sul channel manager."
+        elif result.get("status") == "approved_sync_failed":
+            callback_text = "Prezzo approvato, ma sync OTA fallita."
+            final_line = "*APPROVATO* - sync OTA fallita: controlla integrazione e log."
+        else:
+            callback_text = "Prezzo approvato. Aggiorna manualmente il canale."
+            final_line = "*APPROVATO* - sync OTA non ancora collegato: aggiorna manualmente il prezzo sul canale."
+
+        answer_callback_query(callback_query_id, callback_text)
         edit_message_text(
             chat_id, message_id,
-            original_text + "\n\n*APPROVATO* - prezzo da aggiornare manualmente sul listing."
+            original_text + f"\n\n{final_line}"
         )
         logger.info(
             f"Decisione {log_id} approvata via Telegram (chat_id={chat_id}, "
@@ -395,6 +463,10 @@ def _handle_callback(
             log_id = int(data.split("_", 1)[1])
         except (ValueError, IndexError):
             answer_callback_query(callback_query_id, "❌ ID decisione non valido")
+            return
+
+        if "*APPROVATO*" in original_text or "*RIFIUTATO*" in original_text:
+            answer_callback_query(callback_query_id, "Decisione gia gestita.")
             return
 
         context = _decision_context_for_chat(log_id, chat_id)
@@ -418,6 +490,15 @@ def _handle_callback(
         edit_message_text(
             chat_id, message_id,
             original_text + "\n\n❌ *RIFIUTATO* – il prezzo rimane invariato."
+        )
+        _record_approval_event(
+            context=context,
+            action="reject",
+            status="rejected",
+            chat_id=chat_id,
+            message_id=message_id,
+            callback_query_id=callback_query_id,
+            payload={"decision_log_id": log_id, "reason": "telegram_reject"},
         )
         logger.info(f"Decisione {log_id} rifiutata via Telegram (chat_id={chat_id})")
 
@@ -484,11 +565,15 @@ def poll_forever(timeout: int = 30) -> None:
 
     while True:
         try:
-            resp = _api_call("getUpdates", {
-                "offset":          offset,
-                "timeout":         timeout,
-                "allowed_updates": ["message", "callback_query"],
-            })
+            resp = _api_call(
+                "getUpdates",
+                {
+                    "offset":          offset,
+                    "timeout":         timeout,
+                    "allowed_updates": ["message", "callback_query"],
+                },
+                request_timeout=timeout + 10,
+            )
             if resp.get("ok"):
                 for upd in resp.get("result", []):
                     offset = upd["update_id"] + 1

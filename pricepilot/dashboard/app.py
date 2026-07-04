@@ -28,7 +28,7 @@ from pricepilot.dashboard.auth import (
 )
 
 from pricepilot.core.config import CONFIG, save_config, load_config
-from pricepilot.core.plans import effective_sync_mode, get_plan
+from pricepilot.core.plans import effective_sync_mode, get_plan, normalize_plan
 from pricepilot.core.database import (
     init_db, save_decision, save_competitors,
     save_market_snapshot, get_decisions, get_summary_stats,
@@ -63,9 +63,12 @@ from pricepilot.core.database import (
     save_telegram_link, revoke_telegram_link,
     get_property_integrations, upsert_property_integration, delete_property_integration,
     get_current_price_for_date, get_price_calendar, upsert_calendar_price,
+    get_telegram_approvals, record_telegram_approval,
+    update_calendar_status_for_decision,
 )
 from pricepilot.services.readiness import account_readiness
 from pricepilot.services.account_service import update_account_profile
+from pricepilot.providers.registry import get_billing_provider
 
 # ─── Init DB ──────────────────────────────────────────────────────────────────
 init_db()
@@ -1367,6 +1370,7 @@ def _tab_onboarding():
                 if "airbnb" in u:    return "airbnb"
                 if "booking.com" in u: return "booking"
                 if "vrbo" in u:      return "vrbo"
+                if "smoobu" in u:    return "smoobu"
                 return "other"
 
             if url_input and url_input.strip():
@@ -1638,7 +1642,7 @@ def _tab_onboarding():
             _pcity_esc = _html.escape(_prop_city)
             _plat_esc  = _html.escape(
                 {"airbnb": "Airbnb", "booking": "Booking.com",
-                 "vrbo": "Vrbo", "other": "Diretto"}.get(
+                 "vrbo": "Vrbo", "smoobu": "Smoobu", "other": "Diretto"}.get(
                     st.session_state.get(_plat_key, ""), "—"
                 )
             )
@@ -1688,6 +1692,8 @@ def _onb_detect_platform(url: str) -> str:
         return "booking"
     if "vrbo" in url:
         return "vrbo"
+    if "smoobu" in url:
+        return "smoobu"
     if url:
         return "other"
     return "airbnb"
@@ -1698,6 +1704,7 @@ def _onb_platform_label(platform: str) -> str:
         "airbnb": "Airbnb",
         "booking": "Booking.com",
         "vrbo": "Vrbo",
+        "smoobu": "Smoobu",
         "direct": "Sito diretto",
         "other": "Altro",
     }.get(platform, str(platform or "Altro").title())
@@ -1743,6 +1750,44 @@ def _render_readonly_plan_box(plan: str, *, compact: bool = False):
         f'</div>',
         unsafe_allow_html=True,
     )
+
+
+def _render_billing_action(account_id: int, account: dict, *, key_prefix: str = "billing"):
+    provider = get_billing_provider()
+    is_configured = getattr(provider, "is_billing_configured", lambda: False)()
+    current_plan = normalize_plan(account.get("plan"))
+    customer_id = str(account.get("stripe_customer_id") or "").strip()
+
+    if not is_configured:
+        st.button("Cambia piano", key=f"{key_prefix}_disabled", use_container_width=True, disabled=True)
+        st.caption("Upgrade non ancora attivo: configura Stripe test/live per abilitare checkout e portale cliente.")
+        return
+
+    if customer_id:
+        if st.button("Gestisci piano", key=f"{key_prefix}_portal", use_container_width=True):
+            result = provider.create_customer_portal(account_id=account_id)
+            if result.ok and result.url:
+                st.link_button("Apri area billing", result.url, use_container_width=True)
+            else:
+                st.error(result.error or "Impossibile aprire il customer portal.")
+        return
+
+    target_options = [p for p in ("plus", "pro") if p != current_plan]
+    if not target_options:
+        target_options = ["plus", "pro"]
+    target_plan = st.selectbox(
+        "Upgrade",
+        target_options,
+        format_func=lambda p: get_plan(p)["label"],
+        key=f"{key_prefix}_target",
+        label_visibility="collapsed",
+    )
+    if st.button("Cambia piano", key=f"{key_prefix}_checkout", use_container_width=True):
+        result = provider.create_checkout_session(account_id=account_id, plan=target_plan)
+        if result.ok and result.url:
+            st.link_button("Apri checkout Stripe", result.url, use_container_width=True)
+        else:
+            st.error(result.error or "Impossibile creare il checkout.")
 
 
 def _clear_onboarding_state():
@@ -1852,7 +1897,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                 unsafe_allow_html=True,
             )
 
-            platform_options = ["airbnb", "booking", "vrbo", "direct", "other"]
+            platform_options = ["smoobu", "airbnb", "booking", "vrbo", "direct", "other"]
             saved_platforms = st.session_state.get("onb_platforms") or ["airbnb"]
             platforms = st.multiselect(
                 "Piattaforme usate",
@@ -1943,8 +1988,7 @@ def _tab_onboarding_v2(surface: str = "main"):
 
             plan = (account.get("plan") or "free").lower()
             _render_readonly_plan_box(plan)
-            st.button("Cambia piano", disabled=True, use_container_width=True, key=widget_key("onb_change_plan_disabled"))
-            st.caption("Il cambio piano sara collegato al billing quando aggiungeremo Stripe/Supabase.")
+            _render_billing_action(account_id, account, key_prefix=widget_key("onb_billing"))
 
             b1, b2 = st.columns([1, 1])
             with b1:
@@ -2487,7 +2531,7 @@ def tab_home(cfg: dict):
         if _run_is_running:
             st.warning("Ciclo gia in esecuzione: PricePilot blocca avvii doppi finche non termina.", icon="!")
         elif not can_run_manual_cycle:
-            st.caption("Il ciclo manuale e disponibile solo in ambiente dev/admin. In produzione parte dallo scheduler.")
+            st.caption("Il ciclo manuale e disponibile solo in test/admin. In produzione parte dallo scheduler.")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PART 2 — SUMMARY METRIC CARDS
@@ -2767,7 +2811,7 @@ def tab_home(cfg: dict):
         _pplat_raw = str(prop.get('platform', '') or '').lower()
         _plat_labels = {
             "airbnb": "Airbnb", "booking": "Booking.com",
-            "vrbo": "Vrbo",     "direct": "Diretto", "other": "Altro",
+            "vrbo": "Vrbo", "smoobu": "Smoobu", "direct": "Diretto", "other": "Altro",
         }
         _pplat = _html.escape(_plat_labels.get(_pplat_raw, _pplat_raw.upper() or '—'))
 
@@ -3193,6 +3237,15 @@ def tab_home(cfg: dict):
                 if st.button("✅ SI", key=f"home_app_{item['id']}",
                              use_container_width=True, type="primary"):
                     result = approve_decision(item["id"], account_id=account_id)
+                    record_telegram_approval({
+                        "account_id": account_id,
+                        "property_id": item["property_id"],
+                        "decision_log_id": item["id"],
+                        "action": "approve",
+                        "status": result.get("status", "approved"),
+                        "source": "dashboard",
+                        "payload": result,
+                    })
                     st.toast("Approvato. Aggiorna manualmente il prezzo sul canale.", icon="✅")
                     st.rerun()
             with col_reject:
@@ -3204,6 +3257,21 @@ def tab_home(cfg: dict):
                             "decision=decision||' [REJECTED]' WHERE id=? AND account_id=?",
                             (item["id"], account_id)
                         )
+                    update_calendar_status_for_decision(
+                        decision_log_id=item["id"],
+                        status="rejected",
+                        applied_price=None,
+                        notes="Rifiutato dalla dashboard.",
+                    )
+                    record_telegram_approval({
+                        "account_id": account_id,
+                        "property_id": item["property_id"],
+                        "decision_log_id": item["id"],
+                        "action": "reject",
+                        "status": "rejected",
+                        "source": "dashboard",
+                        "payload": {"decision_log_id": item["id"], "reason": "dashboard_reject"},
+                    })
                     st.toast("Rifiutato.", icon="❌")
                     st.rerun()
             st.divider()
@@ -4164,6 +4232,15 @@ def _render_decision_flow_card(
                 from pricepilot.engine.decision_engine import approve_decision
 
                 result = approve_decision(decision_id, account_id=account_id)
+                record_telegram_approval({
+                    "account_id": account_id,
+                    "property_id": decision.get("property_id"),
+                    "decision_log_id": decision_id,
+                    "action": "approve",
+                    "status": result.get("status", "approved"),
+                    "source": "dashboard",
+                    "payload": result,
+                })
                 if result.get("approved"):
                     st.toast("Decisione approvata. Ora resta in attesa di sync OTA.", icon="✅")
                 else:
@@ -4190,10 +4267,19 @@ def _render_decision_flow_card(
                     )
                 except Exception:
                     pass
+                record_telegram_approval({
+                    "account_id": account_id,
+                    "property_id": decision.get("property_id"),
+                    "decision_log_id": decision_id,
+                    "action": "reject",
+                    "status": "rejected",
+                    "source": "dashboard",
+                    "payload": {"decision_log_id": decision_id, "reason": "dashboard_reject"},
+                })
                 st.toast("Decisione rifiutata.", icon="❌")
                 st.rerun()
         with col_note:
-            st.caption("Nel piano Plus l'approvazione arriva anche da Telegram. Finche non colleghiamo il channel manager, l'approvazione non aggiorna ancora le OTA.")
+            st.caption("Nel piano Plus l'approvazione arriva anche da Telegram. Se il channel manager non e configurato, la decisione resta pronta per aggiornamento manuale.")
 
 
 def _render_decision_list(
@@ -4686,6 +4772,11 @@ def _suggest_name_from_url(url: str, platform: str) -> str:
             m = re.search(r"/listing/(\d+)", url)
             if m:
                 return f"Vrbo Listing {m.group(1)}"
+        # Smoobu: eventuali URL interni/import possono contenere apartment id.
+        if "smoobu" in url or platform == "smoobu":
+            m = re.search(r"(?:apartment|apartments|listing)[/-](\d+)", url)
+            if m:
+                return f"Smoobu Apartment {m.group(1)}"
         # Generico: ultimo segmento path significativo
         from urllib.parse import urlparse
         path = urlparse(url).path
@@ -4721,7 +4812,7 @@ def tab_properties():
     current_plan = account.get("plan", "free")
     plan_info = get_plan(current_plan)
     billing_status_labels = {
-        "dev": "Demo locale",
+        "dev": "Ambiente test",
         "trialing": "Prova gratuita",
         "active": "Attivo",
         "past_due": "Da verificare",
@@ -4756,7 +4847,7 @@ def tab_properties():
                 })
             st.toast("Account aggiornato.", icon="✅")
             st.rerun()
-        st.button("Cambia piano", key="account_plan_upgrade_disabled", use_container_width=True, disabled=True)
+        _render_billing_action(account_id, account, key_prefix="account_plan_upgrade")
 
     st.caption(plan_info["description"])
 
@@ -4770,16 +4861,16 @@ def tab_properties():
         st.caption("Elementi importanti non ancora configurati.")
     with r3:
         st.metric("Stato abbonamento", billing_label)
-        st.caption("Demo locale = nessun pagamento reale collegato.")
+        st.caption("In test il pagamento reale non e ancora richiesto.")
 
     if billing_status == "dev":
         st.info(
-            "Stai usando PricePilot in modalità demo locale: il piano viene mostrato come informazione account. "
-            "Il cambio piano sarà collegato al billing reale."
+            "Ambiente test: puoi verificare piano, onboarding e notifiche prima di attivare Stripe. "
+            "In produzione il cambio piano passera dal checkout."
         )
 
     with st.expander("Checklist configurazione", expanded=readiness["score"] < 80):
-        st.caption("Questa lista dice cosa è pronto e cosa manca prima di collegare channel manager/API reali.")
+        st.caption("Questa lista mostra cosa e pronto prima di collegare channel manager/API reali.")
         for check in readiness["checks"]:
             icon = "✅" if check["ok"] else ("⚠️" if check["required"] else "ℹ️")
             st.markdown(f"{icon} **{check['label']}** · {check.get('detail', '')}")
@@ -5033,7 +5124,7 @@ def tab_properties():
                 placeholder="Es. Roma",
             )
         with sc2:
-            platform_opts = ["airbnb", "booking", "vrbo", "direct", "other"]
+            platform_opts = ["smoobu", "airbnb", "booking", "vrbo", "direct", "other"]
             _plat_default = _draft1.get("platform", "airbnb")
             _plat_idx     = platform_opts.index(_plat_default) \
                             if _plat_default in platform_opts else 0
@@ -5043,8 +5134,8 @@ def tab_properties():
                 index=_plat_idx,
                 key="pf_platform",
                 format_func=lambda x: {"airbnb": "🏠 Airbnb", "booking": "🌐 Booking.com",
-                                        "vrbo": "🏡 Vrbo", "direct": "📋 Diretto",
-                                        "other": "🔗 Altro"}.get(x, x),
+                                        "vrbo": "🏡 Vrbo", "smoobu": "🔄 Smoobu",
+                                        "direct": "📋 Diretto", "other": "🔗 Altro"}.get(x, x),
             )
             pf_url = st.text_input(
                 "Listing URL (opzionale)",
@@ -5109,13 +5200,14 @@ def tab_properties():
         ):
             st.caption("Gestisci listing su più piattaforme per la stessa proprietà.")
             _plat_labels = {"airbnb": "🏠 Airbnb", "booking": "🌐 Booking.com",
-                            "vrbo": "🏡 Vrbo", "direct": "📋 Diretto", "other": "🔗 Altro"}
+                            "vrbo": "🏡 Vrbo", "smoobu": "🔄 Smoobu",
+                            "direct": "📋 Diretto", "other": "🔗 Altro"}
 
             _to_remove = []
             for _oi, _ota in enumerate(_ota_extras):
                 _ota_col1, _ota_col2, _ota_col3, _ota_col4 = st.columns([2, 3, 2, 1])
                 with _ota_col1:
-                    _ota_plat_opts = ["airbnb", "booking", "vrbo", "direct", "other"]
+                    _ota_plat_opts = ["smoobu", "airbnb", "booking", "vrbo", "direct", "other"]
                     _ota_plat_idx  = _ota_plat_opts.index(_ota.get("platform", "airbnb")) \
                                      if _ota.get("platform", "airbnb") in _ota_plat_opts else 0
                     _new_plat = st.selectbox(
@@ -5293,7 +5385,7 @@ def tab_properties():
         account = get_account(account_id) or {"plan": "free"}
         pf_plan = str(account.get("plan") or "free").lower()
         _render_readonly_plan_box(pf_plan, compact=True)
-        st.button("Cambia piano", key="pf_change_plan_disabled", use_container_width=True, disabled=True)
+        _render_billing_action(account_id, account, key_prefix="pf_change_plan")
 
         mode_opts = {
             "advisory": {
@@ -5303,12 +5395,12 @@ def tab_properties():
             },
             "approval": {
                 "label": "✅ Approvazione Telegram",
-                "desc":  "PricePilot invia il suggerimento su Telegram. La sync OTA si attiva quando colleghiamo un channel manager.",
+                "desc":  "PricePilot invia il suggerimento su Telegram. Con channel manager configurato, applica il cambio dopo approvazione.",
                 "color": "#f59e0b",
             },
             "auto": {
                 "label": "🤖 Automatico",
-                "desc":  "Autopilot completo previsto per il piano Pro con channel manager reale collegato.",
+                "desc":  "Autopilot completo per il piano Pro quando il channel manager e configurato.",
                 "color": "#10b981",
             },
         }
@@ -6354,7 +6446,7 @@ def tab_telegram():
                     <span class="tg-preview-value">Weekend + Alta domanda</span>
                 </div>
                 <hr class="tg-preview-divider">
-                <div class="tg-preview-question">Piano Free: aggiorna manualmente il prezzo sulle tue OTA.</div>
+                <div class="tg-preview-question">Test collegamento: verifica che PricePilot possa inviarti messaggi Telegram.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -6425,16 +6517,16 @@ def tab_telegram():
             with col_a:
                 st.caption("Le notifiche di pricing vengono inviate su Telegram.")
             with col_b:
-                if st.button("Invia test", key=f"tg_test_{prop_id}", use_container_width=True):
+                if st.button("Test collegamento", key=f"tg_test_{prop_id}", use_container_width=True):
                     try:
-                        with st.spinner("Invio consiglio Telegram..."):
+                        with st.spinner("Invio test Telegram..."):
                             process_decision(
                                 property_id=prop_id,
                                 occupancy=0.65,
                                 target_date=date.today(),
                                 force_mode="advisory",
                             )
-                        st.toast("Consiglio Telegram inviato.", icon="✅")
+                        st.toast("Test Telegram inviato.", icon="✅")
                     except Exception as exc:
                         st.error(f"Errore invio test: {exc}")
             with col_c:
@@ -6584,7 +6676,16 @@ def tab_telegram():
                 )
             with cb:
                 if st.button("✅", key=f"app_{p['id']}", help="Approva", use_container_width=True):
-                    approve_decision(p["id"], account_id=current_account_id())
+                    result = approve_decision(p["id"], account_id=current_account_id())
+                    record_telegram_approval({
+                        "account_id": current_account_id(),
+                        "property_id": p["property_id"],
+                        "decision_log_id": p["id"],
+                        "action": "approve",
+                        "status": result.get("status", "approved"),
+                        "source": "dashboard",
+                        "payload": result,
+                    })
                     st.toast("Approvato. Aggiorna manualmente il prezzo sul canale.", icon="✅")
                     st.rerun()
             with cc:
@@ -6595,11 +6696,44 @@ def tab_telegram():
                             "decision=decision||' [REJECTED]' WHERE id=? AND account_id=?",
                             (p["id"], current_account_id())
                         )
+                    update_calendar_status_for_decision(
+                        decision_log_id=p["id"],
+                        status="rejected",
+                        applied_price=None,
+                        notes="Rifiutato dalla dashboard.",
+                    )
+                    record_telegram_approval({
+                        "account_id": current_account_id(),
+                        "property_id": p["property_id"],
+                        "decision_log_id": p["id"],
+                        "action": "reject",
+                        "status": "rejected",
+                        "source": "dashboard",
+                        "payload": {"decision_log_id": p["id"], "reason": "dashboard_reject"},
+                    })
                     st.toast("Rifiutato.", icon="❌")
                     st.rerun()
             st.divider()
     else:
         st.success("✅ Nessuna approvazione in sospeso.")
+
+    st.markdown('<div class="section-title">Storico approvazioni</div>',
+                unsafe_allow_html=True)
+    history = get_telegram_approvals(limit=30, account_id=current_account_id())
+    if history:
+        rows = []
+        for item in history:
+            rows.append({
+                "Quando": str(item.get("timestamp", ""))[:16],
+                "Proprieta": item.get("property_name") or f"#{item.get('property_id') or '-'}",
+                "Azione": "Approvato" if item.get("action") == "approve" else "Rifiutato",
+                "Stato": item.get("status", ""),
+                "Origine": "Telegram" if item.get("source") == "telegram" else "Dashboard",
+                "Utente": item.get("telegram_username") or item.get("chat_id") or "-",
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nessuna approvazione o rifiuto registrato.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -6639,7 +6773,16 @@ def tab_integrations():
     from pricepilot.core.database import get_conn
 
     # ── Configurazione globale piattaforme ────────────────────────────────────
+    _smoobu_configured = bool(
+        (os.environ.get("SMOOBU_API_KEY") and os.environ.get("SMOOBU_API_SECRET"))
+        or (os.environ.get("SMOOBU_API_CONSUMER_KEY") and os.environ.get("SMOOBU_API_CONSUMER_SECRET"))
+        or os.environ.get("SMOOBU_LEGACY_API_KEY")
+        or os.environ.get("SMOOBU_API_TOKEN")
+    )
     _PLATFORM_META = {
+        "smoobu":  {"label": "Smoobu",           "icon": "🔄", "color": "#B5523A",
+                    "configured": _smoobu_configured,
+                    "desc": "Channel manager: sincronizza Airbnb, Booking.com e Vrbo."},
         "airbnb":  {"label": "Airbnb",           "icon": "🏠", "color": "#FF5A5F",
                     "configured": bool(os.environ.get("AIRBNB_API_TOKEN"))},
         "booking": {"label": "Booking.com",       "icon": "🌐", "color": "#003580",
@@ -6783,8 +6926,41 @@ def tab_integrations():
     st.markdown("---")
 
     # ── Istruzioni configurazione ──────────────────────────────────────────────
+    if _smoobu_configured:
+        t1, t2 = st.columns([1, 3])
+        with t1:
+            if st.button("Test Smoobu", key="smoobu_test_connection", use_container_width=True):
+                try:
+                    from pricepilot.integrations.smoobu import SmoobuAdapter
+                    test = SmoobuAdapter().test_connection()
+                    if test.get("ok"):
+                        st.success(
+                            f"Smoobu collegato. Appartamenti letti: {test.get('apartments_count', 0)}."
+                        )
+                    else:
+                        st.error(f"Test Smoobu fallito: {test.get('error') or test}")
+                except Exception as exc:
+                    st.error(f"Test Smoobu non riuscito: {exc}")
+        with t2:
+            st.caption(
+                "Il test legge la lista appartamenti da Smoobu. "
+                "Per aggiornare prezzi serve anche mappare il Listing ID/Apartment ID sulla proprieta."
+            )
+
     with st.expander("⚙️ Come attivare le integrazioni Live"):
         st.markdown("""
+**Smoobu** (channel manager consigliato per sincronizzare OTA)
+```
+SMOOBU_API_CONSUMER_KEY=<consumer_key_smoobu>
+SMOOBU_API_CONSUMER_SECRET=<consumer_secret_smoobu>
+SMOOBU_APARTMENT_ID=<id_appartamento_smoobu>
+```
+
+Legacy Smoobu, solo se il tuo account usa ancora la vecchia chiave:
+```
+SMOOBU_LEGACY_API_KEY=<legacy_api_key>
+```
+
 **Airbnb** (richiede accesso [Airbnb Channel Manager API](https://developers.airbnb.com))
 ```
 AIRBNB_API_TOKEN=<token OAuth2>

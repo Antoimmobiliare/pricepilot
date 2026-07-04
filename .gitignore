@@ -29,6 +29,10 @@ streamlit_*.log
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/manual_market.csv
+data/manual_events.csv
+data/manual_occupancy.csv
+!data/*_sample.csv
 
 # Environment variables and local secrets
 .env

@@ -57,6 +57,7 @@ def run_pricing_cycle(
     from pricepilot.providers.registry import (
         get_billing_provider,
         get_event_provider,
+        get_market_data_provider,
         get_occupancy_provider,
     )
 
@@ -101,6 +102,7 @@ def run_pricing_cycle(
     errors = []
     property_results = []
     event_provider = get_event_provider()
+    market_provider = get_market_data_provider()
     occupancy_provider = get_occupancy_provider()
 
     record_audit_event(
@@ -115,6 +117,7 @@ def run_pricing_cycle(
             "date": d.isoformat(),
             "providers": {
                 "billing": getattr(billing_provider, "name", type(billing_provider).__name__),
+                "market": getattr(market_provider, "name", type(market_provider).__name__),
                 "event": getattr(event_provider, "name", type(event_provider).__name__),
                 "occupancy": getattr(occupancy_provider, "name", type(occupancy_provider).__name__),
             },
@@ -136,7 +139,7 @@ def run_pricing_cycle(
                     target_date=d,
                     event=event,
                     competitor_count=int(plan.get("competitor_limit", 10)),
-                    data_source="demo",
+                    data_source=getattr(market_provider, "name", "market_provider"),
                     occupancy_source=occupancy.source,
                 )
                 results.append(result)
@@ -175,6 +178,7 @@ def run_pricing_cycle(
                       for mode in ("advisory", "approval", "auto")},
             "providers": {
                 "billing": getattr(billing_provider, "name", type(billing_provider).__name__),
+                "market": getattr(market_provider, "name", type(market_provider).__name__),
                 "event": getattr(event_provider, "name", type(event_provider).__name__),
                 "occupancy": getattr(occupancy_provider, "name", type(occupancy_provider).__name__),
             },

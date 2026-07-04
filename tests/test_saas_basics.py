@@ -92,6 +92,26 @@ class LiveChannelProvider:
         )
 
 
+class StubChannelProvider:
+    name = "test_channel_stub"
+
+    def update_price(
+        self,
+        *,
+        prop: dict,
+        new_price: float,
+        target_date: date,
+        min_nights: int = 1,
+    ) -> ChannelUpdateResult:
+        return ChannelUpdateResult(
+            ok=True,
+            platform="test_channel",
+            listing_id=str(prop.get("listing_id") or "listing-test"),
+            is_real=False,
+            raw={"stub": True},
+        )
+
+
 class PricePilotSaaSTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -294,6 +314,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self.assertEqual(calendar[0]["status"], "locked")
 
     def test_telegram_approval_without_channel_manager_stays_pending_manual_sync(self):
+        set_channel_manager_provider(StubChannelProvider())
         account = self._account("plus", "Telegram Approval")
         prop = self._property(account)
         result = process_decision(
@@ -314,6 +335,33 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         calendar = get_price_calendar(account_id=account["id"], property_id=prop["id"])
         self.assertEqual(calendar[0]["status"], "approved_pending_manual_sync")
         self.assertIsNone(calendar[0]["applied_price"])
+
+    def test_telegram_approval_with_real_channel_manager_applies_price(self):
+        account = self._account("plus", "Telegram Live Approval")
+        prop = self._property(account)
+        result = process_decision(
+            property_id=prop["id"],
+            occupancy=0.65,
+            target_date=TARGET_DATE,
+            competitor_count=10,
+            data_source="test",
+            occupancy_source="test",
+        )
+
+        approval = approve_decision(result["log_id"], account_id=account["id"])
+
+        self.assertTrue(approval["approved"])
+        self.assertTrue(approval["applied"])
+        self.assertEqual(approval["status"], "applied")
+        self.assertTrue(approval["channel_manager"]["is_real"])
+
+        decision = get_decision_log(account_id=account["id"])[0]
+        self.assertEqual(decision["applied"], 1)
+        self.assertIn("[APPROVED_SYNCED]", decision["decision"])
+
+        calendar = get_price_calendar(account_id=account["id"], property_id=prop["id"])
+        self.assertEqual(calendar[0]["status"], "applied")
+        self.assertEqual(calendar[0]["applied_price"], approval["channel_manager"].get("new_price", result["recommended_price"]))
 
 
 if __name__ == "__main__":

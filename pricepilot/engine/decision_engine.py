@@ -518,6 +518,7 @@ def _channel_manager_update(prop: Dict, new_price: float, d: date) -> Dict:
             "ok":         result.ok,
             "platform":   result.platform,
             "listing_id": result.listing_id,
+            "new_price":  new_price,
             "is_real":    result.is_real,
             "error":      result.error,
         }
@@ -608,7 +609,7 @@ def _telegram_send_recommendation(
     prop: Dict, old_price: float, new_price: float,
     occupancy: float, market_avg: float, event: str, reason: str = "",
 ) -> bool:
-    """Invia un consiglio Free/advisory via Telegram senza pulsanti di approvazione."""
+    """Invia un consiglio advisory via Telegram senza pulsanti di approvazione."""
     try:
         from pricepilot.services.telegram_bot import is_configured, send_message
         if not is_configured():
@@ -646,7 +647,7 @@ def _telegram_send_recommendation(
             f"Occupancy: {occupancy * 100:.0f}%"
             f"{event_line}\n\n"
             f"Motivo: {reason}\n\n"
-            f"Piano Free: aggiorna manualmente il prezzo sulle tue OTA."
+            f"Modalita consiglio: aggiorna manualmente il prezzo sulle tue OTA."
         )
         result = send_message(link["chat_id"], text)
         record_notification_log(
@@ -718,11 +719,11 @@ def _telegram_notify_auto(
 
 
 def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
-    """Approva una decisione senza dichiararla applicata se manca una sync reale."""
+    """Approva una decisione e applica il prezzo se esiste una sync reale."""
     from pricepilot.core.database import get_conn
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, account_id, property_id, new_price, decision FROM decision_log WHERE id=?",
+            "SELECT id, account_id, property_id, new_price, decision, date FROM decision_log WHERE id=?",
             (log_id,)
         ).fetchone()
         if not row:
@@ -745,19 +746,67 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
             }
 
         decision = row["decision"] or ""
-        if "[APPROVED" not in decision:
-            decision = decision + " [APPROVED_PENDING_MANUAL_SYNC]"
-        conn.execute(
-            "UPDATE decision_log SET applied=0, decision=? WHERE id=?",
-            (decision, log_id)
-        )
         property_id = row["property_id"]
         new_price = float(row["new_price"])
+        date_str = row["date"] or date.today().isoformat()
+
+    prop = get_property(int(property_id)) if property_id else None
+    if prop and int(prop.get("account_id") or 1) == row_account_id:
+        try:
+            target_date = datetime.fromisoformat(str(date_str)).date()
+        except ValueError:
+            target_date = date.today()
+        cm_result = _channel_manager_update(prop, new_price, target_date)
+    else:
+        cm_result = {
+            "ok": False,
+            "platform": "unknown",
+            "listing_id": "",
+            "is_real": False,
+            "error": "Proprieta non trovata.",
+        }
+
+    is_real = bool(cm_result.get("ok") and cm_result.get("is_real"))
+    sync_failed = bool(cm_result.get("is_real") and not cm_result.get("ok"))
+
+    if is_real:
+        tag = " [APPROVED_SYNCED]"
+        status = "applied"
+        applied = True
+        applied_price = new_price
+        notes = (
+            f"Approvato e sincronizzato su {cm_result.get('platform')}/"
+            f"{cm_result.get('listing_id')}: {new_price:.2f}."
+        )
+        message = "Decisione approvata e prezzo sincronizzato sul channel manager."
+    elif sync_failed:
+        tag = " [APPROVED_SYNC_FAILED]"
+        status = "approved_sync_failed"
+        applied = False
+        applied_price = None
+        notes = f"Approvato, ma la sync OTA e fallita: {cm_result.get('error', 'errore sconosciuto')}."
+        message = "Decisione approvata, ma la sincronizzazione OTA e fallita. Controlla integrazione e log."
+    else:
+        tag = " [APPROVED_PENDING_MANUAL_SYNC]"
+        status = "approved_pending_manual_sync"
+        applied = False
+        applied_price = None
+        notes = f"Approvato: prezzo {new_price:.2f} in attesa di sync manuale/OTA."
+        message = "Decisione approvata. Aggiorna manualmente il prezzo sul canale finche non colleghiamo un channel manager reale."
+
+    if tag not in decision:
+        decision = decision + tag
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE decision_log SET applied=?, decision=? WHERE id=?",
+            (int(applied), decision, log_id)
+        )
+
     update_calendar_status_for_decision(
         decision_log_id=log_id,
-        status="approved_pending_manual_sync",
-        applied_price=None,
-        notes=f"Approvato: prezzo {new_price:.2f} in attesa di sync manuale/OTA.",
+        status=status,
+        applied_price=applied_price,
+        notes=notes,
     )
     record_audit_event(
         action="decision_approved",
@@ -766,13 +815,21 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
         account_id=row_account_id,
         property_id=property_id,
         source="telegram_or_api",
-        status="approved_pending_manual_sync",
-        details={"applied": False},
+        status=status,
+        details={"applied": applied, "channel_manager": cm_result},
     )
-    logger.info(f"Decisione {log_id} approvata, in attesa di aggiornamento manuale/listing.")
+    logger.info(
+        "Decisione %s approvata: status=%s, applied=%s, channel=%s/%s",
+        log_id,
+        status,
+        applied,
+        cm_result.get("platform"),
+        cm_result.get("listing_id"),
+    )
     return {
         "approved": True,
-        "applied": False,
-        "status": "approved_pending_manual_sync",
-        "message": "Decisione approvata. Aggiorna manualmente il prezzo sul canale finche non colleghiamo un channel manager reale.",
+        "applied": applied,
+        "status": status,
+        "message": message,
+        "channel_manager": cm_result,
     }

@@ -10,3 +10,14 @@ Questo pacchetto contiene i contratti delle integrazioni esterne.
 
 Il motore usa solo questi contratti. Quando colleghiamo API reali, registriamo
 un provider nuovo nel registry senza cambiare la logica di pricing.
+
+Provider disponibili oggi:
+
+- `demo`: dati simulati per sviluppo rapido.
+- `manual`: CSV locali per test realistici gratuiti prima di comprare API.
+
+Impostare `PRICEPILOT_DATA_PROVIDER=manual` per usare:
+
+- `data/manual_market.csv`;
+- `data/manual_events.csv`;
+- `data/manual_occupancy.csv`.

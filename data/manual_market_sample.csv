@@ -1,0 +1,4 @@
+account_id,property_id,date,competitor_name,platform,price,distance_km
+1,1,2026-07-15,Competitor Centro 1,airbnb,145,0.4
+1,1,2026-07-15,Competitor Centro 2,booking,152,0.7
+1,1,2026-07-15,Competitor Centro 3,airbnb,138,1.1
