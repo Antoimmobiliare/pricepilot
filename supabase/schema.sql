@@ -57,8 +57,8 @@ create table if not exists public.user_consents (
     terms_accepted boolean not null default false,
     privacy_accepted boolean not null default false,
     marketing_accepted boolean not null default false,
-    terms_version text not null default '2026-06-23',
-    privacy_version text not null default '2026-06-23',
+    terms_version text not null default '2026-07-13',
+    privacy_version text not null default '2026-07-13',
     source text not null default 'signup',
     accepted_at timestamptz not null default now(),
     created_at timestamptz not null default now(),
@@ -405,8 +405,8 @@ alter table if exists public.user_consents
     add column if not exists terms_accepted boolean default false,
     add column if not exists privacy_accepted boolean default false,
     add column if not exists marketing_accepted boolean default false,
-    add column if not exists terms_version text default '2026-06-23',
-    add column if not exists privacy_version text default '2026-06-23',
+    add column if not exists terms_version text default '2026-07-13',
+    add column if not exists privacy_version text default '2026-07-13',
     add column if not exists source text default 'signup',
     add column if not exists accepted_at timestamptz default now(),
     add column if not exists created_at timestamptz default now(),
@@ -414,8 +414,8 @@ alter table if exists public.user_consents
 update public.user_consents set terms_accepted = false where terms_accepted is null;
 update public.user_consents set privacy_accepted = false where privacy_accepted is null;
 update public.user_consents set marketing_accepted = false where marketing_accepted is null;
-update public.user_consents set terms_version = '2026-06-23' where terms_version is null;
-update public.user_consents set privacy_version = '2026-06-23' where privacy_version is null;
+update public.user_consents set terms_version = '2026-07-13' where terms_version is null;
+update public.user_consents set privacy_version = '2026-07-13' where privacy_version is null;
 update public.user_consents set source = 'signup' where source is null;
 update public.user_consents set accepted_at = now() where accepted_at is null;
 update public.user_consents set created_at = now() where created_at is null;

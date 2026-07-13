@@ -46,11 +46,145 @@ _KEY_PENDING_AUTH_COOKIE = "pp_pending_auth_cookie"
 _KEY_CLEAR_AUTH_COOKIE = "pp_clear_auth_cookie"
 _KEY_AUTH_NOTICE = "pp_auth_notice"
 _COOKIE_AUTH_TOKEN = "pp_auth_token"
-TERMS_VERSION = "2026-06-23"
-PRIVACY_VERSION = "2026-06-23"
+TERMS_VERSION = "2026-07-13"
+PRIVACY_VERSION = "2026-07-13"
+COOKIES_VERSION = "2026-07-13"
 
-PUBLIC_VIEWS = {"landing", "login", "register", "forgot", "reset_password", "terms", "privacy"}
+PUBLIC_VIEWS = {"landing", "login", "register", "forgot", "reset_password", "terms", "privacy", "cookies"}
 PLAN_ORDER = ("free", "plus", "pro")
+
+LEGAL_DOCUMENTS = {
+    "terms": {
+        "title": "Termini di servizio",
+        "version": TERMS_VERSION,
+        "subtitle": "Condizioni operative minime per usare PricePilot in beta e in produzione.",
+        "sections": [
+            (
+                "1. Oggetto del servizio",
+                "PricePilot e una piattaforma SaaS per supportare host e property manager nella gestione "
+                "dei prezzi degli affitti brevi. Il servizio puo generare suggerimenti, notifiche, "
+                "approvazioni Telegram e automazioni di prezzo in base al piano attivo e alle integrazioni collegate.",
+            ),
+            (
+                "2. Piani e livello di automazione",
+                "Il piano Free fornisce suggerimenti e richiede aggiornamento manuale sulle OTA. Il piano Plus "
+                "aggiunge approvazione Telegram e applicazione automatica dopo conferma quando il channel manager "
+                "e collegato. Il piano Pro abilita autopilot completo con guardrail e report, sempre nei limiti "
+                "delle integrazioni disponibili.",
+            ),
+            (
+                "3. Responsabilita dell'utente",
+                "L'utente e responsabile dei dati inseriti, delle credenziali, delle proprieta configurate, dei "
+                "limiti prezzo e delle decisioni operative. I prezzi pubblicati sulle OTA restano sotto la "
+                "responsabilita dell'utente, anche quando una proposta viene approvata o automatizzata.",
+            ),
+            (
+                "4. Nessuna garanzia di ricavo",
+                "PricePilot fornisce analisi e raccomandazioni basate sui dati disponibili. Non garantisce aumento "
+                "dei ricavi, occupazione, prenotazioni o risultati economici specifici.",
+            ),
+            (
+                "5. Integrazioni esterne",
+                "Telegram, Supabase, provider di pagamento, OTA, PMS e channel manager sono servizi terzi. "
+                "Interruzioni, limiti API, errori di sincronizzazione o modifiche dei termini di tali servizi "
+                "possono influenzare il funzionamento di PricePilot.",
+            ),
+            (
+                "6. Uso corretto",
+                "L'utente si impegna a non usare PricePilot per accessi non autorizzati, manipolazione di dati "
+                "altrui, attivita illegali o violazioni dei termini delle OTA e dei provider collegati.",
+            ),
+            (
+                "7. Modifiche e sospensione",
+                "PricePilot puo modificare funzionalita, piani, limiti tecnici o condizioni operative. In caso di "
+                "uso improprio, rischi di sicurezza o mancato pagamento futuro, l'accesso puo essere limitato o sospeso.",
+            ),
+            (
+                "8. Validazione legale",
+                "Questo documento e una base operativa per la fase beta e deve essere verificato da un professionista "
+                "prima della vendita pubblica definitiva.",
+            ),
+        ],
+    },
+    "privacy": {
+        "title": "Privacy Policy",
+        "version": PRIVACY_VERSION,
+        "subtitle": "Informazioni essenziali su quali dati tratta PricePilot e perche.",
+        "sections": [
+            (
+                "1. Dati raccolti",
+                "PricePilot puo trattare email, nome attivita, dati account, proprieta, citta/zona, piattaforme "
+                "usate, range prezzo, strategie, decisioni prezzo, storico operativo, preferenze notifiche, dati "
+                "Telegram necessari alla consegna dei messaggi e identificativi tecnici di sessione.",
+            ),
+            (
+                "2. Finalita del trattamento",
+                "I dati servono per creare e proteggere l'account, mostrare la dashboard, gestire proprieta e piani, "
+                "generare raccomandazioni prezzo, inviare notifiche Telegram, registrare approvazioni, mantenere log "
+                "operativi e migliorare affidabilita del servizio.",
+            ),
+            (
+                "3. Base giuridica operativa",
+                "I trattamenti principali sono necessari per fornire il servizio richiesto dall'utente. Le comunicazioni "
+                "commerciali sono facoltative e vengono gestite con consenso separato.",
+            ),
+            (
+                "4. Provider e trasferimenti",
+                "PricePilot puo usare Supabase per autenticazione e database, Telegram per notifiche, provider di "
+                "pagamento e future integrazioni OTA/PMS/channel manager. Ogni provider riceve solo i dati necessari "
+                "alla funzione collegata.",
+            ),
+            (
+                "5. Conservazione",
+                "I dati sono conservati per il tempo necessario a fornire il servizio, rispettare obblighi tecnici o "
+                "legali, gestire sicurezza, audit e storico operativo. I dati non piu necessari potranno essere "
+                "cancellati o anonimizzati.",
+            ),
+            (
+                "6. Sicurezza e isolamento",
+                "PricePilot usa autenticazione, policy multi-tenant e account scoping per ridurre il rischio che un "
+                "utente acceda ai dati di un altro account.",
+            ),
+            (
+                "7. Diritti dell'utente",
+                "L'utente puo chiedere accesso, correzione, esportazione, limitazione o cancellazione dei dati secondo "
+                "la normativa applicabile. Prima della vendita pubblica va indicato un contatto privacy ufficiale.",
+            ),
+            (
+                "8. Validazione legale",
+                "Questo documento e una base operativa per la fase beta e deve essere verificato da un professionista "
+                "prima della vendita pubblica definitiva.",
+            ),
+        ],
+    },
+    "cookies": {
+        "title": "Cookie e tracking",
+        "version": COOKIES_VERSION,
+        "subtitle": "Informativa minima sui cookie tecnici e sugli strumenti usati da PricePilot.",
+        "sections": [
+            (
+                "1. Cookie tecnici",
+                "PricePilot puo usare cookie o storage tecnico per mantenere la sessione, ricordare lo stato di login "
+                "e rendere stabile l'esperienza utente. Questi strumenti sono necessari al funzionamento della piattaforma.",
+            ),
+            (
+                "2. Analytics e marketing",
+                "Nella configurazione attuale PricePilot non richiede cookie pubblicitari propri. Eventuali analytics, "
+                "pixel marketing o strumenti di remarketing dovranno essere indicati qui prima dell'attivazione.",
+            ),
+            (
+                "3. Servizi terzi",
+                "Supabase, Streamlit Cloud, Telegram o futuri provider di pagamento e integrazione possono usare log "
+                "tecnici o strumenti necessari alla sicurezza, all'autenticazione e alla consegna del servizio.",
+            ),
+            (
+                "4. Scelta dell'utente",
+                "Quando saranno introdotti cookie non necessari, PricePilot dovra mostrare un banner di scelta e salvare "
+                "il consenso in modo separato rispetto ai termini di servizio.",
+            ),
+        ],
+    },
+}
 
 
 def _get_client():
@@ -281,7 +415,7 @@ def _render_auth_page(client):
         view = "landing"
     if view == "landing":
         _render_landing_page()
-    elif view in {"terms", "privacy"}:
+    elif view in {"terms", "privacy", "cookies"}:
         _render_legal_page(view)
     else:
         _render_auth_panel(client, view)
@@ -688,6 +822,18 @@ def _inject_public_css():
       box-shadow:none !important; margin:80px 0 22px !important; }
     .pp-final-cta h2 { color:#ffffff !important; font-size:3.2rem !important; letter-spacing:-.045em; }
     .pp-final-cta p { color:rgba(255,255,255,.66) !important; }
+    .pp-legal-footer { margin:22px 0 8px; padding:22px 0 0; border-top:1px solid rgba(0,0,0,.10);
+      display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+      color:rgba(0,0,0,.56); font-size:.82rem; }
+    .pp-legal-footer strong { color:#000000; }
+    .pp-legal-links { display:flex; gap:12px; flex-wrap:wrap; }
+    .pp-legal-links a { color:rgba(0,0,0,.64); text-decoration:none; font-weight:780; }
+    .pp-legal-links a:hover { color:#B5523A; }
+    .pp-legal-note { margin:12px 0 0; color:rgba(0,0,0,.52); font-size:.82rem; line-height:1.6; }
+    .pp-legal-doc { background:#ffffff; border:1px solid rgba(0,0,0,.10); border-radius:20px;
+      padding:32px; box-shadow:0 24px 70px rgba(0,0,0,.06); }
+    .pp-legal-doc h3 { color:#000000; margin:26px 0 8px; letter-spacing:-.02em; }
+    .pp-legal-doc p { color:rgba(0,0,0,.64); line-height:1.72; margin:0; }
 
     @media (max-width: 900px) {
       .pp-enterprise-hero { padding:54px 0; }
@@ -698,6 +844,7 @@ def _inject_public_css():
       .pp-metric-strip div, .pp-time-step { border-right:0; border-bottom:1px solid rgba(0,0,0,.10); }
       .pp-metric-strip div:last-child, .pp-time-step:last-child { border-bottom:0; }
       .pp-section h2, .pp-feature-copy h2, .pp-final-cta h2 { font-size:2.05rem !important; }
+      .pp-legal-footer { align-items:flex-start; flex-direction:column; }
     }
 
     @keyframes ppFadeUp {
@@ -853,6 +1000,7 @@ def _render_landing_page():
     _render_pricing_section()
     _render_faq_section()
     _render_final_cta_section()
+    _render_public_legal_footer()
 
 
 def _render_dashboard_mockup():
@@ -1395,6 +1543,32 @@ def _render_final_cta_section():
             _go_public("register", "free")
 
 
+def _render_public_legal_footer():
+    st.markdown(
+        '<div class="pp-legal-footer">'
+        '<div><strong>PricePilot</strong> - SaaS revenue management per affitti brevi.</div>'
+        '<div>Documenti versione '
+        f'{_html.escape(TERMS_VERSION)}.</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 5])
+    with c1:
+        if st.button("Termini", key="footer_terms", use_container_width=True):
+            _go_public("terms")
+    with c2:
+        if st.button("Privacy", key="footer_privacy", use_container_width=True):
+            _go_public("privacy")
+    with c3:
+        if st.button("Cookie", key="footer_cookies", use_container_width=True):
+            _go_public("cookies")
+    st.markdown(
+        '<div class="pp-legal-note">Nota: questi documenti sono una base operativa per beta e pre-lancio. '
+        'Prima della vendita pubblica devono essere verificati da un professionista.</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def _reset_auth_scroll():
     components.html(
         """
@@ -1507,13 +1681,16 @@ def _render_auth_panel(client, view: str):
                 st.caption(
                     f"Versioni documenti: Termini {TERMS_VERSION}, Privacy {PRIVACY_VERSION}."
                 )
-                legal_col_1, legal_col_2 = st.columns(2)
+                legal_col_1, legal_col_2, legal_col_3 = st.columns(3)
                 with legal_col_1:
                     if st.button("Leggi Termini", key="auth_read_terms", use_container_width=True):
                         _go_public("terms")
                 with legal_col_2:
                     if st.button("Leggi Privacy", key="auth_read_privacy", use_container_width=True):
                         _go_public("privacy")
+                with legal_col_3:
+                    if st.button("Cookie", key="auth_read_cookies", use_container_width=True):
+                        _go_public("cookies")
                 if st.button("Crea account", key="auth_signup_btn", use_container_width=True, type="primary"):
                     _do_signup(
                         client,
@@ -1541,105 +1718,48 @@ def _render_auth_panel(client, view: str):
 def _render_legal_page(view: str):
     _reset_auth_scroll()
 
-    is_terms = view == "terms"
-    title = "Termini di servizio" if is_terms else "Privacy Policy"
-    version = TERMS_VERSION if is_terms else PRIVACY_VERSION
+    doc = LEGAL_DOCUMENTS.get(view, LEGAL_DOCUMENTS["terms"])
+    title = str(doc["title"])
+    version = str(doc["version"])
     back_label = "Torna alla registrazione"
 
     _, col, _ = st.columns([0.7, 2.2, 0.7])
     with col:
         st.markdown(
             f'<span class="pp-plan-pill">Versione {version}</span>'
-            f'<div class="pp-auth-title">{title}</div>',
+            f'<div class="pp-auth-title">{_html.escape(title)}</div>'
+            f'<div class="pp-auth-copy">{_html.escape(str(doc.get("subtitle", "")))}</div>',
             unsafe_allow_html=True,
         )
-        if is_terms:
-            st.markdown(
-                """
-                ### 1. Oggetto del servizio
-                PricePilot e una piattaforma software per supportare host e property manager
-                nella gestione dei prezzi per affitti brevi. Il servizio puo generare
-                suggerimenti, notifiche e, nei piani abilitati, flussi di approvazione o
-                automazione dei prezzi.
-
-                ### 2. Account e responsabilita dell'utente
-                L'utente e responsabile della correttezza dei dati inseriti, delle credenziali
-                di accesso e delle impostazioni applicate alle proprie proprieta. Le decisioni
-                operative sulle OTA restano sotto la responsabilita dell'utente, salvo diverse
-                condizioni contrattuali future.
-
-                ### 3. Suggerimenti e automazioni
-                I prezzi proposti da PricePilot sono basati sui dati disponibili, sulle regole
-                impostate e sulle integrazioni collegate. I suggerimenti non garantiscono un
-                risultato economico specifico. Nei piani Plus e Pro l'automazione deve rispettare
-                guardrail e impostazioni definite dall'account.
-
-                ### 4. Integrazioni esterne
-                Funzioni come OTA, channel manager, Telegram, pagamenti e provider dati possono
-                dipendere da servizi terzi. Interruzioni, limiti API o errori dei servizi esterni
-                possono influenzare il funzionamento di PricePilot.
-
-                ### 5. Uso corretto
-                L'utente si impegna a non usare PricePilot per attivita illegali, accessi non
-                autorizzati, manipolazione di dati altrui o violazione dei termini delle OTA e
-                dei provider collegati.
-
-                ### 6. Modifiche al servizio
-                PricePilot puo evolvere funzionalita, piani, prezzi e limiti operativi. Le
-                modifiche rilevanti saranno comunicate agli utenti secondo i canali disponibili.
-
-                ### 7. Nota
-                Questo testo e una base operativa da validare prima della pubblicazione
-                commerciale definitiva.
-                """
+        sections_html = []
+        for section_title, body in doc.get("sections", []):
+            sections_html.append(
+                f"<h3>{_html.escape(str(section_title))}</h3>"
+                f"<p>{_html.escape(str(body))}</p>"
             )
-        else:
-            st.markdown(
-                """
-                ### 1. Dati raccolti
-                PricePilot puo trattare dati di account come email, nome attivita, proprieta,
-                impostazioni di prezzo, preferenze Telegram, log operativi e informazioni
-                necessarie al funzionamento del servizio.
+        st.markdown(
+            '<div class="pp-legal-doc">'
+            + "".join(sections_html)
+            + '</div>',
+            unsafe_allow_html=True,
+        )
 
-                ### 2. Finalita
-                I dati sono usati per creare l'account, autenticare l'utente, gestire proprieta
-                e piani, generare raccomandazioni prezzo, inviare notifiche, registrare consensi
-                e mantenere sicurezza e storico operativo.
-
-                ### 3. Base del trattamento
-                I trattamenti principali servono all'esecuzione del servizio richiesto
-                dall'utente. Le comunicazioni commerciali sono facoltative e richiedono consenso
-                separato.
-
-                ### 4. Servizi terzi
-                PricePilot puo usare provider esterni come Supabase per autenticazione/database,
-                Telegram per notifiche, provider di pagamento e future integrazioni OTA/channel
-                manager. Ogni integrazione puo comportare il trasferimento dei dati necessari
-                al suo funzionamento.
-
-                ### 5. Conservazione e sicurezza
-                I dati sono conservati per il tempo necessario a fornire il servizio, rispettare
-                obblighi tecnici o legali e proteggere account e sistemi. L'accesso ai dati e
-                limitato tramite autenticazione e policy multi-tenant.
-
-                ### 6. Diritti dell'utente
-                L'utente puo richiedere accesso, rettifica, cancellazione o limitazione dei dati
-                secondo la normativa applicabile. Prima della vendita pubblica va indicato un
-                contatto privacy ufficiale.
-
-                ### 7. Nota
-                Questo testo e una base operativa da validare prima della pubblicazione
-                commerciale definitiva.
-                """
-            )
-
-        c1, c2 = st.columns(2)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             if st.button(back_label, key=f"legal_{view}_register", use_container_width=True, type="primary"):
                 _go_public("register")
         with c2:
             if st.button("Torna alla home", key=f"legal_{view}_home", use_container_width=True):
                 _go_public("landing")
+        with c3:
+            if st.button("Termini", key=f"legal_{view}_terms", use_container_width=True):
+                _go_public("terms")
+        with c4:
+            if st.button("Privacy", key=f"legal_{view}_privacy", use_container_width=True):
+                _go_public("privacy")
+        if view != "cookies":
+            if st.button("Leggi Cookie e tracking", key=f"legal_{view}_cookies", use_container_width=True):
+                _go_public("cookies")
 
 
 def _auth_title(view: str) -> str:

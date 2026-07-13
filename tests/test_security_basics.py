@@ -162,6 +162,22 @@ class SecurityBasicsTestCase(unittest.TestCase):
         self.assertTrue(consent["privacy_accepted"])
         self.assertFalse(consent["marketing_accepted"])
         self.assertEqual(latest["source"], "unit_test")
+        self.assertEqual(consent["terms_version"], dashboard_auth.TERMS_VERSION)
+        self.assertEqual(consent["privacy_version"], dashboard_auth.PRIVACY_VERSION)
+
+    def test_public_legal_documents_are_versioned_and_accessible(self):
+        self.assertIn("terms", dashboard_auth.PUBLIC_VIEWS)
+        self.assertIn("privacy", dashboard_auth.PUBLIC_VIEWS)
+        self.assertIn("cookies", dashboard_auth.PUBLIC_VIEWS)
+        self.assertEqual(dashboard_auth.TERMS_VERSION, "2026-07-13")
+        self.assertEqual(dashboard_auth.PRIVACY_VERSION, "2026-07-13")
+        self.assertEqual(dashboard_auth.COOKIES_VERSION, "2026-07-13")
+
+        for key in ("terms", "privacy", "cookies"):
+            doc = dashboard_auth.LEGAL_DOCUMENTS[key]
+            self.assertTrue(doc["title"])
+            self.assertTrue(doc["version"])
+            self.assertGreaterEqual(len(doc["sections"]), 4)
 
     def test_supabase_migration_dry_run_counts_account_data(self):
         from pricepilot.services.supabase_migration import dry_run_sqlite_account_migration

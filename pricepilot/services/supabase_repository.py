@@ -150,8 +150,8 @@ def sync_user_consent_to_supabase(
         "terms_accepted": bool(consent.get("terms_accepted")),
         "privacy_accepted": bool(consent.get("privacy_accepted")),
         "marketing_accepted": bool(consent.get("marketing_accepted")),
-        "terms_version": consent.get("terms_version") or "2026-06-23",
-        "privacy_version": consent.get("privacy_version") or "2026-06-23",
+        "terms_version": consent.get("terms_version") or "2026-07-13",
+        "privacy_version": consent.get("privacy_version") or "2026-07-13",
         "source": consent.get("source") or "signup",
         "accepted_at": consent.get("accepted_at") or datetime.utcnow().isoformat(),
     }
