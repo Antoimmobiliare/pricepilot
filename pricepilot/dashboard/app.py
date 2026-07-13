@@ -2529,7 +2529,7 @@ def tab_home(cfg: dict):
         else:
             st.caption("Il ciclo automatico e pronto: eseguilo una volta per iniziare a popolare run, audit e decisioni.")
         if _run_is_running:
-            st.warning("Ciclo gia in esecuzione: PricePilot blocca avvii doppi finche non termina.", icon="!")
+            st.warning("Ciclo gia in esecuzione: PricePilot blocca avvii doppi finche non termina.")
         elif not can_run_manual_cycle:
             st.caption("Il ciclo manuale e disponibile solo in test/admin. In produzione parte dallo scheduler.")
 

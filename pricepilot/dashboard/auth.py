@@ -384,13 +384,11 @@ def require_auth() -> bool:
             st.sidebar.error(
                 "Autenticazione disabilitata non consentita in produzione. "
                 "Configura Supabase Auth oppure cambia PRICEPILOT_ENV.",
-                icon="!",
             )
             _render_auth_page(_get_client())
             return False
         st.sidebar.warning(
             "Autenticazione disabilitata. Stai usando PRICEPILOT_AUTH_MODE=disabled.",
-            icon="!",
         )
         return True
 
@@ -398,7 +396,6 @@ def require_auth() -> bool:
     if _is_production() and client is None:
         st.sidebar.error(
             "Supabase Auth non configurato. In produzione il fallback locale e disattivato.",
-            icon="!",
         )
     _render_auth_page(client)
     return False
@@ -1661,7 +1658,6 @@ def _render_auth_panel(client, view: str):
                     st.info(
                         "Il piano scelto verra attivato dopo il checkout. "
                         "Intanto l'account parte dal piano Free.",
-                        icon="!",
                     )
                 signup_pw = st.text_input(
                     "Password",
@@ -1708,7 +1704,6 @@ def _render_auth_panel(client, view: str):
             if client is None and not _local_auth_allowed():
                 st.warning(
                     "Supabase non e configurato. In produzione il login locale e disattivato.",
-                    icon="!",
                 )
             st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
             if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
