@@ -23,6 +23,16 @@ Production environment:
 - `PRICEPILOT_ALLOW_PAID_SIGNUP_WITHOUT_CHECKOUT=0`
 - `PRICEPILOT_ALLOW_MANUAL_CYCLE=0`
 
+Streamlit Cloud:
+
+- Repository: `Antoimmobiliare/pricepilot`
+- Branch: `main`
+- Main file path: `pricepilot/dashboard/app.py`
+- Python runtime: `runtime.txt`
+- Secrets template: `.streamlit/secrets.toml.example`
+
+See `docs/STREAMLIT_CLOUD.md` for the step-by-step dashboard deploy.
+
 ## API
 
 Run command:
@@ -67,6 +77,8 @@ Copy the sample files in `data/` and rename them without `_sample`.
 - Supabase RLS enabled and schema applied.
 - New user can register and confirm email.
 - Terms and Privacy are visible from signup.
+- Cookie/tracking page is visible from signup and landing footer.
+- User consent is saved with the current legal document versions.
 - User can create one property.
 - Telegram can link to the property.
 - Free sends recommendations only.

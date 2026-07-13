@@ -298,5 +298,7 @@ Per una SaaS reale servono almeno due deploy separati:
 Checklist operative:
 
 - `docs/DEPLOYMENT.md`;
+- `docs/STREAMLIT_CLOUD.md`;
+- `.streamlit/secrets.toml.example`;
 - `docs/STRIPE_TEST_CHECKLIST.md`;
 - `docs/PRE_TOOL_ROADMAP.md`.
