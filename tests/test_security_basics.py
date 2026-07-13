@@ -123,6 +123,17 @@ class SecurityBasicsTestCase(unittest.TestCase):
         self.assertIn("account_members", sql)
         self.assertIn("auth.uid()", sql)
         self.assertIn("enable row level security", sql)
+        self.assertIn("create schema if not exists private", sql)
+        self.assertIn("create or replace function private.is_account_member", sql)
+        self.assertIn("create or replace function private.is_account_owner", sql)
+        self.assertIn("create or replace function private.owns_account_record", sql)
+        self.assertIn("set search_path = public, pg_temp", sql)
+        self.assertNotIn("using (public.is_account_member", sql)
+        self.assertNotIn("using (public.is_account_owner", sql)
+        self.assertNotIn("using (public.owns_account_record", sql)
+        self.assertNotIn("with check (public.is_account_member", sql)
+        self.assertNotIn("with check (public.is_account_owner", sql)
+        self.assertNotIn("with check (public.owns_account_record", sql)
         for table in (
             "user_consents",
             "decision_log",
