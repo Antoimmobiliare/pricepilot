@@ -59,6 +59,13 @@ GET https://your-api-domain/ready
 
 The response must return `ok=true` before public testing.
 
+Render/Railway deployment files are included:
+
+- `render.yaml` for Render web services;
+- `railway.json` for Railway.
+
+See `docs/API_DEPLOY_RENDER_RAILWAY.md` for the step-by-step API deploy.
+
 ## Free data mode
 
 Before buying APIs, use CSV data:

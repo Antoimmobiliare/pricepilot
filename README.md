@@ -206,6 +206,12 @@ Endpoint di controllo:
 `/ready` resta pubblico per permettere controlli di deploy/monitoring, ma le
 API private sono bloccate da API key in produzione.
 
+Per deploy FastAPI su Render o Railway sono inclusi:
+
+- `render.yaml`;
+- `railway.json`;
+- guida `docs/API_DEPLOY_RENDER_RAILWAY.md`.
+
 ## Billing Stripe
 
 Il provider Stripe gestisce checkout, Customer Portal e webhook di aggiornamento piano.
