@@ -3710,7 +3710,59 @@ def tab_analytics(cfg: dict):
     df = load_decisions_df(limit=500, account_id=account_id)
 
     if df.empty:
-        st.info("📭 Nessun dato storico disponibile. I prezzi vengono registrati automaticamente dal motore PricePilot.")
+        st.markdown(
+            """
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;
+                        padding:22px 24px;margin:8px 0 18px">
+                <div style="font-size:1.05rem;font-weight:800;color:#111827;margin-bottom:6px">
+                    Le analisi si attivano dopo i primi cicli di pricing
+                </div>
+                <div style="font-size:0.92rem;color:#64748b;line-height:1.6">
+                    PricePilot userà storico prezzi, mercato, occupazione e decisioni approvate
+                    per mostrarti ricavi stimati, opportunità perse e andamento rispetto ai competitor.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(
+            """
+            <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+                <div style="font-weight:800;margin-bottom:4px">1. Primo ciclo</div>
+                <div style="font-size:0.86rem;color:#6b7280;line-height:1.5">
+                    Genera i primi consigli prezzo dalla Home o dal ciclo automatico.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        c2.markdown(
+            """
+            <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+                <div style="font-weight:800;margin-bottom:4px">2. Decisioni</div>
+                <div style="font-size:0.86rem;color:#6b7280;line-height:1.5">
+                    Le proposte Free, Plus o Pro entrano nello storico decisionale.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        c3.markdown(
+            """
+            <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:16px">
+                <div style="font-weight:800;margin-bottom:4px">3. Insight</div>
+                <div style="font-size:0.86rem;color:#6b7280;line-height:1.5">
+                    Con più dati vedrai trend, revenue stimata e confronto col mercato.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Quando collegheremo channel manager e API reali, questa sezione userà anche prezzi applicati, "
+            "occupazione reale e storico prenotazioni."
+        )
         return
 
     # ── KPI ──────────────────────────────────────────────────────────────────
@@ -6027,9 +6079,9 @@ def tab_calendar(cfg: dict):
 
     st.markdown("---")
 
-    # ── Dettaglio giorno selezionato ──────────────────────────────────────────
+    # ── Prezzo del giorno selezionato ─────────────────────────────────────────
     st.markdown(
-        '<div class="section-title">🔍 Dettaglio Giorno</div>',
+        '<div class="section-title">🔍 Prezzo del giorno</div>',
         unsafe_allow_html=True,
     )
 
@@ -6051,7 +6103,7 @@ def tab_calendar(cfg: dict):
         st.session_state["cal_day_input"] = min(max(_cur, min_cal), max_cal)
 
         sel_day = st.date_input(
-            "📅 Seleziona giorno",
+            "📅 Giorno selezionato",
             min_value=min_cal,
             max_value=max_cal,
             key="cal_day_input",
@@ -6337,6 +6389,10 @@ def tab_calendar(cfg: dict):
         f'<div class="section-title">📈 Prezzi {sel_month_lbl}</div>',
         unsafe_allow_html=True,
     )
+    st.caption(
+        "Le barre mostrano il prezzo PricePilot per ogni giorno. "
+        "La linea viola tratteggiata mostra la media mercato dei competitor."
+    )
 
     chart_rows = []
     for p, ep in zip(month_prices, eff_prices):
@@ -6354,33 +6410,77 @@ def tab_calendar(cfg: dict):
     df_ch = pd.DataFrame(chart_rows)
 
     color_map = {
-        "Bloccato": "#9b59b6",
-        "Modifica": "#27ae60",
-        "Weekend":  "#e74c3c",
-        "Evento":   "#f39c12",
         "Normale":  "#667eea",
+        "Weekend":  "#f97316",
+        "Evento":   "#f59e0b",
+        "Modifica": "#27ae60",
+        "Bloccato": "#9b59b6",
     }
-    bar_colors = [color_map.get(t, "#667eea") for t in df_ch["Tipo"]]
+    label_map = {
+        "Normale":  "Prezzo normale",
+        "Weekend":  "Weekend",
+        "Evento":   "Evento",
+        "Modifica": "Modifica manuale",
+        "Bloccato": "Bloccato",
+    }
+
+    st.markdown(
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.78rem;margin:4px 0 12px">'
+        '<span style="background:#eef2ff;color:#3730a3;border-radius:999px;padding:4px 10px">'
+        '■ Prezzo normale</span>'
+        '<span style="background:#fff7ed;color:#9a3412;border-radius:999px;padding:4px 10px">'
+        '■ Weekend</span>'
+        '<span style="background:#fffbeb;color:#92400e;border-radius:999px;padding:4px 10px">'
+        '■ Evento</span>'
+        '<span style="background:#ecfdf5;color:#166534;border-radius:999px;padding:4px 10px">'
+        '■ Modifica manuale</span>'
+        '<span style="background:#f3e8ff;color:#6b21a8;border-radius:999px;padding:4px 10px">'
+        '■ Bloccato</span>'
+        '<span style="background:#f5f3ff;color:#6d28d9;border-radius:999px;padding:4px 10px">'
+        '••• Media mercato</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     fig_cal = go.Figure()
+    for tipo in ["Normale", "Weekend", "Evento", "Modifica", "Bloccato"]:
+        df_tipo = df_ch[df_ch["Tipo"] == tipo]
+        if df_tipo.empty:
+            continue
+        fig_cal.add_trace(go.Bar(
+            x=df_tipo["Data"],
+            y=df_tipo["Prezzo (€)"],
+            name=label_map[tipo],
+            marker_color=color_map[tipo],
+            text=df_tipo["Prezzo (€)"].apply(lambda x: f"€{x:.0f}"),
+            textposition="outside",
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                f"{label_map[tipo]}: €%{{y:.0f}}<extra></extra>"
+            ),
+        ))
     fig_cal.add_trace(go.Scatter(
-        x=df_ch["Data"], y=df_ch["Mercato (€)"],
-        name="Media Mercato",
+        x=df_ch["Data"],
+        y=df_ch["Mercato (€)"],
+        name="Media mercato competitor",
         line=dict(color="#9b59b6", dash="dot", width=2),
-    ))
-    fig_cal.add_trace(go.Bar(
-        x=df_ch["Data"], y=df_ch["Prezzo (€)"],
-        name="Prezzo",
-        marker_color=bar_colors,
-        text=df_ch["Prezzo (€)"].apply(lambda x: f"€{x:.0f}"),
-        textposition="outside",
+        mode="lines+markers",
+        hovertemplate="<b>%{x}</b><br>Media mercato: €%{y:.0f}<extra></extra>",
     ))
     fig_cal.update_layout(
         xaxis_title="Data", yaxis_title="Prezzo (€)",
         height=340, showlegend=True,
         plot_bgcolor="white", paper_bgcolor="white",
         hovermode="x unified", bargap=0.15,
-        legend=dict(orientation="h", y=1.02),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=11),
+        ),
+        margin=dict(t=70, r=20, b=40, l=50),
     )
     st.plotly_chart(fig_cal, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -7342,37 +7442,47 @@ def main():
 
     st.markdown("---")
 
-    # ── Tabs SaaS ─────────────────────────────────────────────────────────────
-    tab0, tab1, tab2, tab_cal, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "🏠 Home",
-        "🏡 Proprietà",
-        "🎯 Prezzi",
-        "📅 Calendario",
-        "📈 Analisi",
-        "📋 Decisioni",
-        "🔔 Telegram",
-        "🔌 Integrazioni",
-        "🤖 Auto Apply",
-    ])
+    # Renderizza una sola sezione per volta. Le tab native Streamlit eseguono
+    # anche i contenuti nascosti a ogni rerun, rendendo la dashboard pesante.
+    nav_items = [
+        ("home", "\U0001f3e0 Home"),
+        ("properties", "\U0001f3e1 Propriet\u00e0"),
+        ("pricing", "\U0001f3af Prezzi"),
+        ("calendar", "\U0001f4c5 Calendario"),
+        ("analytics", "\U0001f4c8 Analisi"),
+        ("decisions", "\U0001f4cb Decisioni"),
+        ("telegram", "\U0001f514 Telegram"),
+        ("integrations", "\U0001f50c Integrazioni"),
+        ("auto_apply", "\U0001f916 Auto Apply"),
+    ]
+    nav_labels = [label for _, label in nav_items]
+    nav_label_to_key = {label: key for key, label in nav_items}
 
-    with tab0:
-        tab_home(cfg)
-    with tab1:
-        tab_properties()
-    with tab2:
-        tab_pricing(cfg)
-    with tab_cal:
-        tab_calendar(cfg)
-    with tab3:
-        tab_analytics(cfg)
-    with tab4:
-        tab_decisions(cfg)
-    with tab5:
-        tab_telegram()
-    with tab6:
-        tab_integrations()
-    with tab7:
-        tab_auto_log()
+    current_label = st.session_state.get("pp_main_section_label")
+    if current_label not in nav_labels:
+        st.session_state["pp_main_section_label"] = nav_labels[0]
+
+    selected_label = st.radio(
+        "Sezione",
+        nav_labels,
+        key="pp_main_section_label",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    selected_key = nav_label_to_key.get(selected_label, "home")
+
+    renderers = {
+        "home": lambda: tab_home(cfg),
+        "properties": tab_properties,
+        "pricing": lambda: tab_pricing(cfg),
+        "calendar": lambda: tab_calendar(cfg),
+        "analytics": lambda: tab_analytics(cfg),
+        "decisions": lambda: tab_decisions(cfg),
+        "telegram": tab_telegram,
+        "integrations": tab_integrations,
+        "auto_apply": tab_auto_log,
+    }
+    renderers[selected_key]()
 
 
 if __name__ == "__main__":
