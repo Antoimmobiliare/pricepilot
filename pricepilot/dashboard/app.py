@@ -64,7 +64,8 @@ from pricepilot.core.database import (
     get_property_integrations, upsert_property_integration, delete_property_integration,
     get_current_price_for_date, get_price_calendar, upsert_calendar_price,
     get_telegram_approvals, record_telegram_approval,
-    update_calendar_status_for_decision,
+    update_calendar_status_for_decision, mark_decision_rejected,
+    get_price_updates,
 )
 from pricepilot.services.readiness import account_readiness
 from pricepilot.services.account_service import update_account_profile
@@ -2243,7 +2244,7 @@ def _parse_dec_reasons(notes: str, factors: str, pct: float) -> list:
 def tab_home(cfg: dict):
     """Home – Pannello di controllo Autopilot."""
     from pricepilot.core.database import (
-        get_decisions, get_pending_approvals, get_conn,
+        get_decisions, get_pending_approvals,
         update_calendar_status_for_decision,
     )
     from pricepilot.engine.decision_engine import approve_decision
@@ -3251,12 +3252,7 @@ def tab_home(cfg: dict):
             with col_reject:
                 if st.button("❌ NO", key=f"home_rej_{item['id']}",
                              use_container_width=True):
-                    with get_conn() as conn:
-                        conn.execute(
-                            "UPDATE decision_log SET applied=0, "
-                            "decision=decision||' [REJECTED]' WHERE id=? AND account_id=?",
-                            (item["id"], account_id)
-                        )
+                    mark_decision_rejected(item["id"], account_id)
                     update_calendar_status_for_decision(
                         decision_log_id=item["id"],
                         status="rejected",
@@ -4300,16 +4296,7 @@ def _render_decision_flow_card(
                 st.rerun()
         with col_no:
             if st.button("Rifiuta", key=f"{key_prefix}_reject_{decision_id}", use_container_width=True):
-                from pricepilot.core.database import get_conn, update_calendar_status_for_decision
-
-                with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE decision_log SET applied=0, "
-                        "decision=CASE WHEN instr(COALESCE(decision,''),'[REJECTED]') > 0 "
-                        "THEN decision ELSE COALESCE(decision,'')||' [REJECTED]' END "
-                        "WHERE id=? AND account_id=?",
-                        (decision_id, account_id),
-                    )
+                mark_decision_rejected(decision_id, account_id)
                 try:
                     update_calendar_status_for_decision(
                         decision_log_id=decision_id,
@@ -6727,8 +6714,6 @@ def tab_telegram():
 
     if pending:
         from pricepilot.engine.decision_engine import approve_decision
-        from pricepilot.core.database import get_conn as _get_conn
-
         for p in pending:
             pct      = (p["new_price"] - p["old_price"]) / max(p["old_price"], 1) * 100
             arrow    = "▲" if pct > 0 else "▼"
@@ -6790,12 +6775,7 @@ def tab_telegram():
                     st.rerun()
             with cc:
                 if st.button("❌", key=f"rej_{p['id']}", help="Rifiuta", use_container_width=True):
-                    with _get_conn() as conn:
-                        conn.execute(
-                            "UPDATE decision_log SET applied=0, "
-                            "decision=decision||' [REJECTED]' WHERE id=? AND account_id=?",
-                            (p["id"], current_account_id())
-                        )
+                    mark_decision_rejected(p["id"], current_account_id())
                     update_calendar_status_for_decision(
                         decision_log_id=p["id"],
                         status="rejected",
@@ -6870,8 +6850,6 @@ def tab_integrations():
         st.error(f"Channel Manager non disponibile: {exc}")
         return
 
-    from pricepilot.core.database import get_conn
-
     # ── Configurazione globale piattaforme ────────────────────────────────────
     _smoobu_configured = bool(
         (os.environ.get("SMOOBU_API_KEY") and os.environ.get("SMOOBU_API_SECRET"))
@@ -6915,20 +6893,17 @@ def tab_integrations():
         else:
             conn_badge = "🔴 Non connesso"; conn_bg = "#fee2e2"; conn_fg = "#991b1b"
 
-        # Ultimo aggiornamento prezzo
+        # Ultimo aggiornamento: legge dal repository operativo (SQLite o cloud).
         try:
-            with get_conn() as conn:
-                last_upd = conn.execute(
-                    "SELECT new_price, applied_at, is_stub FROM price_updates "
-                    "WHERE property_id=? ORDER BY applied_at DESC LIMIT 1",
-                    (prop["id"],)
-                ).fetchone()
+            updates = get_price_updates([int(prop["id"])], limit=1)
+            last_upd = updates[0] if updates else None
         except Exception:
             last_upd = None
 
         last_str = (
-            f"Ultimo: €{last_upd[0]:.2f} · {str(last_upd[1])[:16]}"
-            f"{'  ·  sim.' if last_upd[2] else '  ·  live'}"
+            f"Ultimo: €{float(last_upd.get('new_price') or 0):.2f} · "
+            f"{str(last_upd.get('applied_at', ''))[:16]}"
+            f"{'  ·  sim.' if bool(last_upd.get('is_stub')) else '  ·  live'}"
             if last_upd else "Nessun aggiornamento"
         )
 
@@ -7122,44 +7097,26 @@ def tab_auto_log():
     with col_f3:
         limit_rows = st.selectbox("Righe", [50, 100, 200, 500], key="alog_limit")
 
-    # ── Leggi dati da price_updates + decision_log (per motivo) ──────────────
-    from pricepilot.core.database import get_conn
+    # ── Leggi repository operativo + decisioni applicate (per il motivo) ────
     try:
-        with get_conn() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS price_updates (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    property_id INTEGER,
-                    platform TEXT,
-                    listing_id TEXT,
-                    target_date TEXT,
-                    new_price REAL,
-                    ok INTEGER,
-                    error TEXT,
-                    applied_at TEXT,
-                    is_stub INTEGER DEFAULT 1
-                )
-            """)
-            # Cerca di unire con decision_log per avere il motivo.
-            # Filtra sempre sulle proprieta dell'account corrente.
-            placeholders = ",".join("?" for _ in prop_ids)
-            rows = conn.execute(f"""
-                SELECT
-                    pu.id, pu.property_id, pu.platform, pu.target_date,
-                    pu.new_price, pu.ok, pu.is_stub, pu.applied_at,
-                    p.name AS property_name,
-                    dl.old_price,
-                    dl.notes AS reason
-                FROM price_updates pu
-                LEFT JOIN properties p ON p.id = pu.property_id
-                LEFT JOIN decision_log dl
-                    ON dl.property_id = pu.property_id
-                    AND dl.applied = 1
-                    AND date(dl.timestamp) = date(pu.applied_at)
-                WHERE pu.property_id IN ({placeholders})
-                ORDER BY pu.applied_at DESC
-                LIMIT ?
-            """, (*prop_ids, int(limit_rows))).fetchall()
+        rows = get_price_updates(prop_ids, limit=int(limit_rows))
+        decisions = get_decision_log(limit=5000, account_id=current_account_id())
+        for row in rows:
+            property_id = int(row.get("property_id") or 0)
+            row["property_name"] = prop_map.get(property_id, "—")
+            applied_at = str(row.get("applied_at") or "")[:10]
+            related = next(
+                (
+                    decision
+                    for decision in decisions
+                    if int(decision.get("property_id") or 0) == property_id
+                    and int(decision.get("applied") or 0) == 1
+                    and str(decision.get("timestamp") or "")[:10] == applied_at
+                ),
+                None,
+            )
+            row["old_price"] = related.get("old_price") if related else None
+            row["reason"] = related.get("notes", "") if related else ""
     except Exception as exc:
         st.error(f"Errore lettura log: {exc}")
         return
@@ -7173,7 +7130,7 @@ def tab_auto_log():
         )
         return
 
-    df = pd.DataFrame([dict(r) for r in rows])
+    df = pd.DataFrame(rows)
 
     # Applica filtri
     if filter_prop != "Tutte":

@@ -31,6 +31,7 @@ from pricepilot.core.database import (
     update_user,
 )
 from pricepilot.core.plans import get_plan, normalize_plan
+from pricepilot.core.data_backend import is_supabase_primary
 from pricepilot.core.supabase_client import get_supabase_client
 from pricepilot.services.account_service import create_account_owner
 from pricepilot.services.supabase_repository import (
@@ -1901,11 +1902,12 @@ def _store_supabase_session(resp, account_name: str = "", plan: str | None = Non
         if local_user:
             _queue_auth_cookie(create_auth_session(int(local_user["id"])))
         account = get_account(int((local_user or {}).get("account_id") or 1))
-        sync_account_membership_to_supabase(
-            account or {},
-            local_user or {},
-            str(getattr(user, "id", "") or ""),
-        )
+        if not is_supabase_primary():
+            sync_account_membership_to_supabase(
+                account or {},
+                local_user or {},
+                str(getattr(user, "id", "") or ""),
+            )
         _record_signup_consent(
             local_user,
             terms_accepted=bool(metadata.get("terms_accepted")),
@@ -1913,7 +1915,7 @@ def _store_supabase_session(resp, account_name: str = "", plan: str | None = Non
             accepted_at=metadata.get("consented_at") or "",
             source="supabase_login",
             supabase_user_id=str(getattr(user, "id", "") or ""),
-            sync_remote=True,
+            sync_remote=not is_supabase_primary(),
             only_if_missing=True,
         )
 
@@ -2049,6 +2051,14 @@ def _ensure_external_user(
     email = (email or "").strip().lower()
     if not email:
         return None
+    if is_supabase_primary():
+        from pricepilot.services.supabase_primary import ensure_authenticated_user
+        return ensure_authenticated_user(
+            email=email,
+            external_user_id=external_user_id,
+            plan=_account_plan_for_signup(plan),
+            account_name=account_name,
+        )
     existing = get_user_by_email(email)
     if existing:
         update_user(int(existing["id"]), {

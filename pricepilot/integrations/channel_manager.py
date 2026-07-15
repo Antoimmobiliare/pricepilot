@@ -187,39 +187,20 @@ def _env_token_for_platform(platform: str) -> str:
 def _persist_update(prop: Dict, result: PriceUpdateResult, target_date: date) -> None:
     """Salva l'esito dell'aggiornamento nel database (tabella price_updates)."""
     try:
-        from pricepilot.core.database import get_conn
-        with get_conn() as conn:
-            # Crea tabella se non esiste (migrazione lazy)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS price_updates (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    property_id INTEGER,
-                    platform    TEXT,
-                    listing_id  TEXT,
-                    target_date TEXT,
-                    new_price   REAL,
-                    ok          INTEGER,
-                    error       TEXT,
-                    applied_at  TEXT,
-                    is_stub     INTEGER DEFAULT 1
-                )
-            """)
-            conn.execute("""
-                INSERT INTO price_updates
-                    (property_id, platform, listing_id, target_date,
-                     new_price, ok, error, applied_at, is_stub)
-                VALUES (?,?,?,?,?,?,?,?,?)
-            """, (
-                prop.get("id"),
-                result.platform,
-                result.listing_id,
-                target_date.isoformat(),
-                result.new_price,
-                int(result.ok),
-                result.error or "",
-                result.applied_at,
-                int(result.raw.get("stub", False)),
-            ))
+        from pricepilot.core.database import record_price_update
+        record_price_update(
+            prop,
+            {
+                "platform": result.platform,
+                "listing_id": result.listing_id,
+                "new_price": result.new_price,
+                "ok": result.ok,
+                "error": result.error or "",
+                "applied_at": result.applied_at,
+                "raw": result.raw or {},
+            },
+            target_date,
+        )
     except Exception as exc:
         logger.error(f"_persist_update error: {exc}")
 

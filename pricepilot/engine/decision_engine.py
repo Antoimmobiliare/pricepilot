@@ -379,13 +379,14 @@ def process_decision(
         reason     = reason,
     )
 
-    # Aggiorna decision_log con la label finale
-    from pricepilot.core.database import get_conn
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE decision_log SET decision=?, applied=? WHERE id=?",
-            (decision_label, int(applied), log_id)
-        )
+    # Aggiorna decision_log tramite il repository attivo (SQLite o Supabase).
+    from pricepilot.core.database import update_decision_state
+    update_decision_state(
+        log_id,
+        account_id=account_id,
+        applied=bool(applied),
+        decision=decision_label,
+    )
 
     calendar_status = (
         "applied" if applied else
@@ -720,35 +721,31 @@ def _telegram_notify_auto(
 
 def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
     """Approva una decisione e applica il prezzo se esiste una sync reale."""
-    from pricepilot.core.database import get_conn
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT id, account_id, property_id, new_price, decision, date FROM decision_log WHERE id=?",
-            (log_id,)
-        ).fetchone()
-        if not row:
-            logger.warning(f"Decisione {log_id} non trovata.")
-            return {
-                "approved": False,
-                "applied": False,
-                "status": "not_found",
-                "message": "Decisione non trovata.",
-            }
+    from pricepilot.core.database import get_decision_log_entry, update_decision_state
+    row = get_decision_log_entry(log_id)
+    if not row:
+        logger.warning(f"Decisione {log_id} non trovata.")
+        return {
+            "approved": False,
+            "applied": False,
+            "status": "not_found",
+            "message": "Decisione non trovata.",
+        }
 
-        row_account_id = int(row["account_id"] or 1)
-        if account_id is not None and row_account_id != int(account_id):
-            logger.warning(f"Decisione {log_id} non appartiene all'account {account_id}.")
-            return {
-                "approved": False,
-                "applied": False,
-                "status": "forbidden",
-                "message": "Decisione non disponibile per questo account.",
-            }
+    row_account_id = int(row["account_id"] or 1)
+    if account_id is not None and row_account_id != int(account_id):
+        logger.warning(f"Decisione {log_id} non appartiene all'account {account_id}.")
+        return {
+            "approved": False,
+            "applied": False,
+            "status": "forbidden",
+            "message": "Decisione non disponibile per questo account.",
+        }
 
-        decision = row["decision"] or ""
-        property_id = row["property_id"]
-        new_price = float(row["new_price"])
-        date_str = row["date"] or date.today().isoformat()
+    decision = row["decision"] or ""
+    property_id = row["property_id"]
+    new_price = float(row["new_price"])
+    date_str = row["date"] or date.today().isoformat()
 
     prop = get_property(int(property_id)) if property_id else None
     if prop and int(prop.get("account_id") or 1) == row_account_id:
@@ -796,11 +793,12 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
 
     if tag not in decision:
         decision = decision + tag
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE decision_log SET applied=?, decision=? WHERE id=?",
-            (int(applied), decision, log_id)
-        )
+    update_decision_state(
+        log_id,
+        account_id=row_account_id,
+        applied=bool(applied),
+        decision=decision,
+    )
 
     update_calendar_status_for_decision(
         decision_log_id=log_id,

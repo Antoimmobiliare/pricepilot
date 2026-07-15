@@ -12,6 +12,10 @@ import os
 from datetime import date
 from typing import List, Optional
 
+# Il processo API puo gestire task multi-account in modo server-side. La
+# dashboard Streamlit, invece, resta vincolata al singolo account autenticato.
+os.environ.setdefault("PRICEPILOT_RUNTIME", "api")
+
 try:
     from fastapi import FastAPI, HTTPException, Query, Request
     from fastapi.middleware.cors import CORSMiddleware

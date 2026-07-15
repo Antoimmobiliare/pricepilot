@@ -341,29 +341,8 @@ def _handle_start(chat_id: int, username: str, token: str) -> None:
 
 def _decision_context_for_chat(log_id: int, chat_id: int) -> Optional[Dict]:
     """Ritorna la decisione solo se la chat e collegata alla stessa proprieta."""
-    from pricepilot.core.database import get_conn
-
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT id, account_id, property_id FROM decision_log WHERE id=?",
-            (log_id,),
-        ).fetchone()
-        if not row:
-            return None
-        link = conn.execute("""
-            SELECT id, telegram_username FROM telegram_links
-            WHERE property_id=? AND chat_id=? AND active=1
-            ORDER BY id DESC LIMIT 1
-        """, (row["property_id"], chat_id)).fetchone()
-        if not link:
-            return None
-    return {
-        "id": int(row["id"]),
-        "account_id": int(row["account_id"] or 1),
-        "property_id": int(row["property_id"]),
-        "telegram_link_id": int(link["id"]),
-        "telegram_username": link["telegram_username"] or "",
-    }
+    from pricepilot.core.database import get_telegram_decision_context
+    return get_telegram_decision_context(log_id, chat_id)
 
 
 def _record_approval_event(
@@ -408,7 +387,7 @@ def _handle_callback(
     original_text: str,
 ) -> None:
     """Gestisce i pulsanti inline ✅ Approva / ❌ Rifiuta."""
-    from pricepilot.core.database import get_conn, update_calendar_status_for_decision
+    from pricepilot.core.database import mark_decision_rejected, update_calendar_status_for_decision
     from pricepilot.engine.decision_engine import approve_decision
 
     if data.startswith("approve_"):
@@ -474,12 +453,7 @@ def _handle_callback(
             answer_callback_query(callback_query_id, "Decisione non disponibile per questa chat")
             return
 
-        with get_conn() as conn:
-            conn.execute(
-                "UPDATE decision_log SET applied=0, decision=decision||' [REJECTED]' "
-                "WHERE id=? AND account_id=?",
-                (log_id, context["account_id"]),
-            )
+        mark_decision_rejected(log_id, context["account_id"])
         update_calendar_status_for_decision(
             decision_log_id=log_id,
             status="rejected",
@@ -629,6 +603,8 @@ def get_bot_info() -> Dict:
 
 if __name__ == "__main__":
     import sys
+
+    os.environ.setdefault("PRICEPILOT_RUNTIME", "worker")
 
     # Assicura che il root del progetto sia nel path
     from pathlib import Path

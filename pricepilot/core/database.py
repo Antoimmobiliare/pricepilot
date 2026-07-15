@@ -7,12 +7,18 @@ import hashlib
 import secrets
 import sqlite3
 import json
+from functools import wraps
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from contextlib import contextmanager
 from typing import List, Optional, Dict, Any
 
 from pricepilot.core.config import CONFIG
+from pricepilot.core.data_backend import (
+    CloudDatabaseUnavailable,
+    is_supabase_primary,
+    require_supabase_primary,
+)
 
 
 def get_db_path() -> str:
@@ -23,6 +29,10 @@ def get_db_path() -> str:
 
 @contextmanager
 def get_conn():
+    if is_supabase_primary():
+        raise CloudDatabaseUnavailable(
+            "SQLite locale non disponibile: PRICEPILOT_DATABASE_BACKEND=supabase."
+        )
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -38,6 +48,10 @@ def get_conn():
 
 def init_db() -> None:
     """Crea tutte le tabelle se non esistono."""
+    if is_supabase_primary():
+        # Lo schema cloud viene gestito dalle migrazioni Supabase versionate.
+        require_supabase_primary(require_service_role=True)
+        return
     with get_conn() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS properties (
@@ -2129,3 +2143,176 @@ def get_pending_approvals(
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Facade helpers shared by SQLite development and Supabase primary runtimes.
+# ---------------------------------------------------------------------------
+
+def get_decision_log_entry(log_id: int, account_id: Optional[int] = None) -> Optional[Dict]:
+    query = "SELECT * FROM decision_log WHERE id=?"
+    params: list[Any] = [int(log_id)]
+    if account_id is not None:
+        query += " AND account_id=?"
+        params.append(int(account_id))
+    with get_conn() as conn:
+        row = conn.execute(query, params).fetchone()
+    return dict(row) if row else None
+
+
+def update_decision_state(
+    log_id: int,
+    *,
+    account_id: int,
+    applied: bool,
+    decision: str,
+) -> Optional[Dict]:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE decision_log SET applied=?, decision=? WHERE id=? AND account_id=?",
+            (int(bool(applied)), str(decision), int(log_id), int(account_id)),
+        )
+    return get_decision_log_entry(log_id, account_id)
+
+
+def mark_decision_rejected(log_id: int, account_id: int) -> Optional[Dict]:
+    row = get_decision_log_entry(log_id, account_id)
+    if not row:
+        return None
+    decision = str(row.get("decision") or "")
+    if "[REJECTED]" not in decision:
+        decision = f"{decision} [REJECTED]".strip()
+    return update_decision_state(
+        log_id,
+        account_id=int(account_id),
+        applied=False,
+        decision=decision,
+    )
+
+
+def get_telegram_decision_context(log_id: int, chat_id: int) -> Optional[Dict]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT account_id, property_id FROM decision_log WHERE id=?",
+            (int(log_id),),
+        ).fetchone()
+        if not row:
+            return None
+        link = conn.execute(
+            """SELECT id, telegram_username FROM telegram_links
+               WHERE property_id=? AND chat_id=? AND active=1
+               ORDER BY id DESC LIMIT 1""",
+            (int(row["property_id"]), int(chat_id)),
+        ).fetchone()
+    if not link:
+        return None
+    return {
+        "id": int(log_id),
+        "account_id": int(row["account_id"] or 1),
+        "property_id": int(row["property_id"]),
+        "telegram_link_id": int(link["id"]),
+        "telegram_username": str(link["telegram_username"] or ""),
+    }
+
+
+def record_price_update(prop: Dict, result: Dict, target_date: date) -> int:
+    """Storico applicazioni OTA, usato anche quando il channel manager e stub."""
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS price_updates (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   account_id INTEGER NOT NULL DEFAULT 1,
+                   property_id INTEGER NOT NULL,
+                   platform TEXT, listing_id TEXT, target_date TEXT,
+                   new_price REAL, ok INTEGER NOT NULL DEFAULT 0,
+                   error TEXT, applied_at TEXT, is_stub INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
+        cursor = conn.execute(
+            """INSERT INTO price_updates
+               (account_id, property_id, platform, listing_id, target_date, new_price,
+                ok, error, applied_at, is_stub)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(prop.get("account_id") or 1),
+                int(prop["id"]),
+                str(result.get("platform") or prop.get("platform") or ""),
+                str(result.get("listing_id") or prop.get("listing_id") or ""),
+                target_date.isoformat(),
+                result.get("new_price"),
+                int(bool(result.get("ok"))),
+                str(result.get("error") or ""),
+                result.get("applied_at") or now,
+                int(bool((result.get("raw") or {}).get("stub", False))),
+            ),
+        )
+    return int(cursor.lastrowid)
+
+
+def get_price_updates(property_ids: List[int], limit: int = 500) -> List[Dict]:
+    if not property_ids:
+        return []
+    placeholders = ",".join("?" for _ in property_ids)
+    with get_conn() as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS price_updates (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   account_id INTEGER NOT NULL DEFAULT 1,
+                   property_id INTEGER NOT NULL,
+                   platform TEXT, listing_id TEXT, target_date TEXT,
+                   new_price REAL, ok INTEGER NOT NULL DEFAULT 0,
+                   error TEXT, applied_at TEXT, is_stub INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
+        rows = conn.execute(
+            f"SELECT * FROM price_updates WHERE property_id IN ({placeholders}) "
+            "ORDER BY applied_at DESC LIMIT ?",
+            [int(item) for item in property_ids] + [int(limit)],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _cloud_or_sqlite(name: str, local_function):
+    """Usa Supabase come fonte unica senza un fallback locale silenzioso."""
+    @wraps(local_function)
+    def wrapped(*args, **kwargs):
+        if is_supabase_primary():
+            # Streamlit e codice server-side: anche il ripristino sessione deve
+            # funzionare senza dipendere da una sessione browser Supabase.
+            require_supabase_primary(require_service_role=True)
+            from pricepilot.services.supabase_primary import dispatch
+            return dispatch(name, *args, **kwargs)
+        return local_function(*args, **kwargs)
+    return wrapped
+
+
+_CLOUD_PRIMARY_OPERATIONS = (
+    "create_account", "get_account", "update_account",
+    "get_user", "get_user_by_email", "get_users", "create_user", "update_user", "delete_user",
+    "create_auth_session", "get_user_by_auth_session", "revoke_auth_session",
+    "record_user_consent", "get_latest_user_consent",
+    "ensure_default_guardrail_policy", "get_guardrail_policy", "update_guardrail_policy",
+    "count_auto_actions_today", "record_audit_event", "get_audit_events",
+    "start_operation_run", "try_start_operation_run", "get_active_operation_run", "finish_operation_run",
+    "get_operation_run", "get_operation_runs", "get_last_operation_run",
+    "ensure_default_notification_preferences", "get_notification_preferences",
+    "update_notification_preferences", "record_notification_log", "get_notification_log",
+    "upsert_property", "get_properties", "get_property", "delete_property",
+    "save_decision_log", "get_decision_log", "get_decision_log_entry", "update_decision_state",
+    "mark_decision_rejected", "save_occupancy", "get_occupancy_history", "save_market_history",
+    "get_market_history", "get_calendar_price", "get_price_calendar", "upsert_calendar_price",
+    "get_current_price_for_date", "save_price_recommendation", "update_calendar_status_for_decision",
+    "save_telegram_link", "get_telegram_link_by_token", "get_telegram_link_by_property",
+    "revoke_telegram_link", "get_all_telegram_links", "get_telegram_decision_context",
+    "record_telegram_approval", "get_telegram_approvals", "get_pending_approvals",
+    "get_property_integrations", "upsert_property_integration", "delete_property_integration",
+    "update_decision_tg_message", "record_price_update", "get_price_updates",
+    "save_decision", "get_decisions", "save_competitors", "get_competitors", "upsert_event",
+    "get_events", "save_market_snapshot", "get_market_snapshots", "get_summary_stats",
+)
+
+for _operation_name in _CLOUD_PRIMARY_OPERATIONS:
+    _operation = globals().get(_operation_name)
+    if _operation is not None:
+        globals()[_operation_name] = _cloud_or_sqlite(_operation_name, _operation)

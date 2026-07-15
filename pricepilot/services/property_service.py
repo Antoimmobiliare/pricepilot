@@ -9,6 +9,7 @@ from typing import List, Optional, Dict
 from pricepilot.core.database import (
     upsert_property, get_properties, get_property, delete_property, get_account,
 )
+from pricepilot.core.data_backend import is_supabase_primary
 from pricepilot.models.property import Property, SYNC_MODES, PLATFORMS
 from pricepilot.core.plans import PLANS, effective_sync_mode, get_plan_limit, normalize_plan
 from pricepilot.services.supabase_repository import (
@@ -24,13 +25,14 @@ logger = logging.getLogger("pricepilot.property_service")
 
 def list_properties(account_id: Optional[int] = None) -> List[Dict]:
     """Ritorna le proprieta dell'account, o tutte in modalita admin/dev."""
-    if account_id is not None:
+    if account_id is not None and not is_supabase_primary():
         refresh_properties_from_supabase(int(account_id))
     props = get_properties()
     if account_id is None:
         return props
     scoped = [p for p in props if int(p.get("account_id") or 1) == int(account_id)]
-    backfill_account_properties_to_supabase(int(account_id), scoped)
+    if not is_supabase_primary():
+        backfill_account_properties_to_supabase(int(account_id), scoped)
     return scoped
 
 
@@ -53,7 +55,8 @@ def create_property(data: Dict) -> Dict:
     _enforce_property_limit(data)
     new_id = upsert_property(data)
     prop   = get_property(new_id)
-    sync_property_and_pricing_to_supabase(prop)
+    if not is_supabase_primary():
+        sync_property_and_pricing_to_supabase(prop)
     logger.info(f"Proprietà creata: id={new_id} name={data['name']}")
     return prop
 
@@ -67,7 +70,7 @@ def update_property(prop_id: int, data: Dict) -> Optional[Dict]:
     _validate(merged)
     upsert_property(merged)
     updated = get_property(prop_id)
-    if updated:
+    if updated and not is_supabase_primary():
         sync_property_and_pricing_to_supabase(updated)
     logger.info(f"Proprietà aggiornata: id={prop_id}")
     return updated
@@ -78,7 +81,8 @@ def remove_property(prop_id: int) -> bool:
     prop = get_property(prop_id)
     if not prop:
         return False
-    delete_property_from_supabase(prop)
+    if not is_supabase_primary():
+        delete_property_from_supabase(prop)
     delete_property(prop_id)
     logger.info(f"Proprietà eliminata: id={prop_id}")
     return True
@@ -86,7 +90,8 @@ def remove_property(prop_id: int) -> bool:
 
 def sync_property_pricing_rules(prop: Dict, rules: Optional[Dict] = None) -> None:
     """Sincronizza su Supabase le regole prezzo reali della proprieta."""
-    sync_pricing_rule_to_supabase(prop, rules or {})
+    if not is_supabase_primary():
+        sync_pricing_rule_to_supabase(prop, rules or {})
 
 
 def get_or_create_default(account_id: int = 1) -> Dict:

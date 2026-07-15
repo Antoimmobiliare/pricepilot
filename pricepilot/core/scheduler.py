@@ -2,6 +2,7 @@
 PricePilot - Scheduler
 Esecuzione periodica del motore di pricing.
 """
+import os
 import time
 import logging
 from datetime import date, datetime, timedelta
@@ -223,5 +224,6 @@ def run_pricing_cycle(
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("PRICEPILOT_RUNTIME", "scheduler")
     logging.basicConfig(level=logging.INFO)
     run_periodic(lambda: run_pricing_cycle(source="scheduler_cli"), hours=6)

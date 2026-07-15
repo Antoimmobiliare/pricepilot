@@ -140,6 +140,21 @@ SUPABASE_SERVICE_ROLE_KEY=
 La service role serve per sync controllate, migrazioni e processi backend. Non
 deve mai essere esposta nel frontend o condivisa.
 
+### Supabase come database operativo unico
+
+Durante sviluppo PricePilot puo usare SQLite locale. Prima di avviare servizi
+separati (Streamlit Cloud, API Render, webhook Telegram e scheduler) esegui il
+cutover documentato in [docs/SUPABASE_CLOUD_PRIMARY_CUTOVER.md](docs/SUPABASE_CLOUD_PRIMARY_CUTOVER.md).
+Alla fine dello step le applicazioni ricevono soltanto:
+
+```env
+PRICEPILOT_DATABASE_BACKEND=supabase
+SUPABASE_SERVICE_ROLE_KEY=server-side-only-secret
+```
+
+Da quel momento SQLite non viene piu usato come fallback: un errore cloud ferma
+l'operazione, evitando dati diversi tra dashboard, API e Telegram.
+
 Per deploy pubblico impostare `PRICEPILOT_ENV=production`. In produzione
 `PRICEPILOT_AUTH_MODE=disabled` viene bloccato e il fallback locale resta
 disattivato salvo override esplicito per test interni.
