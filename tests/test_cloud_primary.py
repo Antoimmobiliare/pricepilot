@@ -43,6 +43,12 @@ class CloudBackendTests(unittest.TestCase):
         self.assertIn("create table if not exists public.price_updates", sql)
         self.assertIn("cloud_primary_cutover_ready", sql)
         self.assertNotIn("drop table", sql)
+        self.assertIn("private.is_account_member(account_id)", sql)
+        self.assertNotIn("public.is_account_member(account_id)", sql)
+        self.assertLess(
+            sql.index("alter table public.profiles\n    add column if not exists updated_at"),
+            sql.index("update public.profiles\nset local_id"),
+        )
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from pricepilot.core.data_backend import is_supabase_primary
@@ -273,7 +273,15 @@ TENANT_TABLES: tuple[dict[str, Any], ...] = (
         "local_table": "price_updates",
         "remote_table": "price_updates",
         "on_conflict": "account_id,local_id",
-        "query": "SELECT * FROM price_updates WHERE account_id=? ORDER BY id",
+        # Le versioni locali precedenti non salvavano ``account_id`` qui:
+        # lo ricaviamo dalla proprieta' collegata, mantenendo il tenant scope.
+        "query": (
+            "SELECT pu.*, p.account_id AS account_id "
+            "FROM price_updates pu "
+            "JOIN properties p ON p.id=pu.property_id "
+            "WHERE p.account_id=? "
+            "ORDER BY pu.id"
+        ),
         "payload": lambda row: {
             "account_id": _as_int(row.get("account_id")),
             "local_id": _as_int(row.get("id")),
@@ -531,7 +539,7 @@ def _migrate_user_consents(
         "WHERE uc.account_id=? ORDER BY uc.id",
         (source_account_id,),
     )
-    payloads: list[Dict[str, Any]] = []
+    payloads_by_version: dict[tuple[str, str, str], Dict[str, Any]] = {}
     for row in rows:
         email = str(row.get("email") or "").strip().lower()
         if not email:
@@ -544,7 +552,7 @@ def _migrate_user_consents(
             continue
         if not profiles:
             continue
-        payloads.append({
+        payload = {
             "account_id": cloud_account_id,
             "user_id": profiles[0]["id"],
             "terms_accepted": _as_bool(row.get("terms_accepted")),
@@ -554,8 +562,21 @@ def _migrate_user_consents(
             "privacy_version": row.get("privacy_version") or "2026-07-13",
             "source": row.get("source") or "sqlite_cutover",
             "accepted_at": row.get("accepted_at") or _now_iso(),
-        })
-    return {"read": len(rows), "synced": _upsert_payloads(
+        }
+        # Lo storico locale puo contenere tentativi ripetuti di registrazione
+        # per la stessa versione dei documenti. Supabase conserva un consenso
+        # per utente/versione, quindi manteniamo il piu recente.
+        version_key = (
+            str(payload["user_id"]),
+            str(payload["terms_version"]),
+            str(payload["privacy_version"]),
+        )
+        previous = payloads_by_version.get(version_key)
+        if previous is None or str(payload["accepted_at"]) >= str(previous["accepted_at"]):
+            payloads_by_version[version_key] = payload
+
+    payloads = list(payloads_by_version.values())
+    return {"read": len(payloads), "source_rows": len(rows), "synced": _upsert_payloads(
         client, table="user_consents", payloads=payloads,
         on_conflict="user_id,terms_version,privacy_version",
     )}
@@ -650,7 +671,7 @@ def _main() -> int:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 if __name__ == "__main__":

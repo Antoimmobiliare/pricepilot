@@ -10,6 +10,10 @@ create extension if not exists pgcrypto;
 -- cloud hanno UUID come chiave tecnica; local_id mantiene compatibilita con
 -- dashboard e motore senza introdurre un secondo database.
 alter table public.profiles add column if not exists local_id bigint;
+-- Alcuni account creati con lo schema iniziale avevano gia il trigger
+-- set_profiles_updated_at ma non la colonna corrispondente.
+alter table public.profiles
+    add column if not exists updated_at timestamptz not null default now();
 
 create sequence if not exists public.profiles_local_id_seq;
 alter table public.profiles
@@ -48,6 +52,14 @@ begin
         sequence_name := 'pp_' || table_name || '_local_id_seq';
         execute format('create sequence if not exists public.%I', sequence_name);
         execute format('alter table public.%I add column if not exists local_id bigint', table_name);
+        -- Alcuni progetti creati con versioni precedenti dello schema avevano
+        -- gia il trigger set_updated_at, ma non ancora la relativa colonna.
+        -- La aggiungiamo prima di qualsiasi UPDATE, cosi il passaggio resta
+        -- idempotente anche in presenza di quegli schemi storici.
+        execute format(
+            'alter table public.%I add column if not exists updated_at timestamptz not null default now()',
+            table_name
+        );
         execute format(
             'alter table public.%I alter column local_id set default nextval(%L::regclass)',
             table_name,
@@ -201,32 +213,32 @@ alter table public.market_snapshots enable row level security;
 drop policy if exists price_updates_member_all on public.price_updates;
 create policy price_updates_member_all on public.price_updates
 for all to authenticated
-using (public.is_account_member(account_id))
-with check (public.is_account_member(account_id));
+using (private.is_account_member(account_id))
+with check (private.is_account_member(account_id));
 
 drop policy if exists pricing_decisions_member_all on public.pricing_decisions;
 create policy pricing_decisions_member_all on public.pricing_decisions
 for all to authenticated
-using (public.is_account_member(account_id))
-with check (public.is_account_member(account_id));
+using (private.is_account_member(account_id))
+with check (private.is_account_member(account_id));
 
 drop policy if exists competitors_member_all on public.competitors;
 create policy competitors_member_all on public.competitors
 for all to authenticated
-using (public.is_account_member(account_id))
-with check (public.is_account_member(account_id));
+using (private.is_account_member(account_id))
+with check (private.is_account_member(account_id));
 
 drop policy if exists events_member_all on public.events;
 create policy events_member_all on public.events
 for all to authenticated
-using (public.is_account_member(account_id))
-with check (public.is_account_member(account_id));
+using (private.is_account_member(account_id))
+with check (private.is_account_member(account_id));
 
 drop policy if exists market_snapshots_member_all on public.market_snapshots;
 create policy market_snapshots_member_all on public.market_snapshots
 for all to authenticated
-using (public.is_account_member(account_id))
-with check (public.is_account_member(account_id));
+using (private.is_account_member(account_id))
+with check (private.is_account_member(account_id));
 
 -- Mantiene aggiornate le colonne timestamp delle tabelle create qui.
 drop trigger if exists set_price_updates_created_at on public.price_updates;
