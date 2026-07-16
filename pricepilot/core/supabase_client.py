@@ -18,15 +18,34 @@ from typing import Any
 logger = logging.getLogger("pricepilot.supabase")
 
 
+def _setting(name: str) -> str:
+    """Legge una configurazione senza esporre mai il valore nei log.
+
+    Streamlit Cloud espone normalmente i secret di primo livello anche come
+    variabili d'ambiente. Il fallback su ``st.secrets`` copre le versioni o le
+    configurazioni Cloud in cui questo passaggio non avviene.
+    """
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+
+    try:
+        import streamlit as st
+
+        return str(st.secrets.get(name, "") or "").strip()
+    except Exception:
+        return ""
+
+
 def get_supabase_settings() -> tuple[str, str]:
     return (
-        os.environ.get("SUPABASE_URL", "").strip(),
-        os.environ.get("SUPABASE_ANON_KEY", "").strip(),
+        _setting("SUPABASE_URL"),
+        _setting("SUPABASE_ANON_KEY"),
     )
 
 
 def get_supabase_service_role_key() -> str:
-    return os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    return _setting("SUPABASE_SERVICE_ROLE_KEY")
 
 
 def is_supabase_configured() -> bool:
@@ -72,7 +91,7 @@ def get_supabase_admin_client() -> Any | None:
     Il service role bypassa RLS: non va mai esposto al browser e va usato solo
     dopo che PricePilot ha gia risolto server-side account_id/utente.
     """
-    url = os.environ.get("SUPABASE_URL", "").strip()
+    url = _setting("SUPABASE_URL")
     key = get_supabase_service_role_key()
     if not url or not key:
         return None
