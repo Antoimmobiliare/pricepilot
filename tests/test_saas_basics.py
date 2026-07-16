@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from pricepilot.core.config import CONFIG
 from pricepilot.core.database import (
@@ -31,6 +33,7 @@ from pricepilot.services.property_service import (
     get_property_by_id,
     list_properties,
 )
+import pricepilot.services.property_service as property_service
 
 
 TARGET_DATE = date(2026, 5, 18)  # Monday, no weekend boost.
@@ -116,6 +119,16 @@ class PricePilotSaaSTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._old_db_path = CONFIG["db_path"]
+        self._old_database_backend = os.environ.get("PRICEPILOT_DATABASE_BACKEND")
+        # These unit tests must never write to the configured cloud tenant.
+        os.environ["PRICEPILOT_DATABASE_BACKEND"] = "sqlite"
+        self._cloud_sync_patches = [
+            patch.object(property_service, "refresh_properties_from_supabase", return_value=[]),
+            patch.object(property_service, "backfill_account_properties_to_supabase", return_value=None),
+            patch.object(property_service, "sync_property_and_pricing_to_supabase", return_value=None),
+        ]
+        for cloud_patch in self._cloud_sync_patches:
+            cloud_patch.start()
         CONFIG["db_path"] = str(Path(self._tmp.name) / "pricepilot_test.db")
         init_db()
         reset_providers()
@@ -127,7 +140,13 @@ class PricePilotSaaSTestCase(unittest.TestCase):
     def tearDown(self):
         decision_engine.notify_price_change = self._old_notify_price_change
         reset_providers()
+        for cloud_patch in reversed(self._cloud_sync_patches):
+            cloud_patch.stop()
         CONFIG["db_path"] = self._old_db_path
+        if self._old_database_backend is None:
+            os.environ.pop("PRICEPILOT_DATABASE_BACKEND", None)
+        else:
+            os.environ["PRICEPILOT_DATABASE_BACKEND"] = self._old_database_backend
         self._tmp.cleanup()
 
     def _account(self, plan: str, name: str | None = None) -> dict:

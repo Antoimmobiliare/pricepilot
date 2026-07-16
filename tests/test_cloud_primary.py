@@ -45,6 +45,11 @@ class CloudBackendTests(unittest.TestCase):
         self.assertNotIn("drop table", sql)
         self.assertIn("private.is_account_member(account_id)", sql)
         self.assertNotIn("public.is_account_member(account_id)", sql)
+        self.assertIn("grant usage on schema private to authenticated", sql)
+        self.assertIn(
+            "grant execute on function private.is_account_member(bigint) to authenticated",
+            sql,
+        )
         self.assertLess(
             sql.index("alter table public.profiles\n    add column if not exists updated_at"),
             sql.index("update public.profiles\nset local_id"),

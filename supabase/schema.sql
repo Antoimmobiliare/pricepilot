@@ -767,6 +767,14 @@ revoke all on function private.owns_account_record(bigint) from public;
 revoke all on function private.owns_account_record(bigint) from anon;
 revoke all on function private.owns_account_record(bigint) from authenticated;
 
+-- Le policy RLS chiamano queste funzioni per verificare l'appartenenza
+-- dell'utente all'account. L'esecuzione e' concessa solo agli utenti gia'
+-- autenticati: anon e public restano esclusi.
+grant usage on schema private to authenticated;
+grant execute on function private.is_account_member(bigint) to authenticated;
+grant execute on function private.is_account_owner(bigint) to authenticated;
+grant execute on function private.owns_account_record(bigint) to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.accounts enable row level security;
 alter table public.account_members enable row level security;

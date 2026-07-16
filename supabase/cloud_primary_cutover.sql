@@ -6,6 +6,14 @@
 
 create extension if not exists pgcrypto;
 
+-- Le policy RLS dello schema base usano helper privati per verificare il
+-- tenant. Gli utenti autenticati devono poterli eseguire, mentre anon e
+-- public non ricevono alcun permesso.
+grant usage on schema private to authenticated;
+grant execute on function private.is_account_member(bigint) to authenticated;
+grant execute on function private.is_account_owner(bigint) to authenticated;
+grant execute on function private.owns_account_record(bigint) to authenticated;
+
 -- I record storici di PricePilot usano identificativi interi. Le tabelle
 -- cloud hanno UUID come chiave tecnica; local_id mantiene compatibilita con
 -- dashboard e motore senza introdurre un secondo database.
