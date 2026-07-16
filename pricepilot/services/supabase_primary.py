@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 from pricepilot.core.data_backend import CloudDatabaseUnavailable, server_runtime
 from pricepilot.core.supabase_client import (
     get_supabase_account_client,
+    get_supabase_admin_client,
     has_supabase_auth_session,
 )
 
@@ -67,6 +68,23 @@ def _client() -> Any:
         raise CloudDatabaseUnavailable(
             "Supabase cloud primario attivo, ma non esiste una sessione utente "
             "o una SUPABASE_SERVICE_ROLE_KEY server-side."
+        )
+    return client
+
+
+def _session_client() -> Any:
+    """Client server-side per i cookie di sessione PricePilot.
+
+    ``app_sessions`` contiene esclusivamente hash di token HttpOnly e non ha
+    policy RLS per i client. Anche dopo un login Supabase riuscito, il client
+    con bearer token dell'utente non deve poter leggere o scrivere quella
+    tabella: queste operazioni restano nel processo server tramite service
+    role.
+    """
+    client = get_supabase_admin_client()
+    if client is None:
+        raise CloudDatabaseUnavailable(
+            "SUPABASE_SERVICE_ROLE_KEY necessaria per gestire le sessioni cloud."
         )
     return client
 
@@ -446,18 +464,27 @@ def create_auth_session(user_id: int, ttl_days: int = 14) -> str:
         raise CloudDatabaseUnavailable("Utente cloud non trovato per la sessione.")
     token = secrets.token_urlsafe(48)
     expires_at = datetime.utcnow() + timedelta(days=max(1, int(ttl_days)))
-    _insert("app_sessions", {
+    rows = _data(_session_client().table("app_sessions").insert({
         "user_id": profile["id"],
         "token_hash": _hash_session_token(token),
         "expires_at": expires_at.isoformat(),
-    })
+    }).execute())
+    if not rows:
+        raise CloudDatabaseUnavailable("Supabase non ha creato la sessione PricePilot.")
     return token
 
 
 def get_user_by_auth_session(token: str) -> Optional[Dict]:
     if not token:
         return None
-    session = _one(_select("app_sessions", filters={"token_hash": _hash_session_token(token)}, limit=1))
+    session = _one(_data(
+        _session_client()
+        .table("app_sessions")
+        .select("*")
+        .eq("token_hash", _hash_session_token(token))
+        .limit(1)
+        .execute()
+    ))
     if not session or session.get("revoked_at"):
         return None
     try:
@@ -465,17 +492,22 @@ def get_user_by_auth_session(token: str) -> Optional[Dict]:
             return None
     except (TypeError, ValueError):
         return None
-    profile = _one(_select("profiles", filters={"id": session["user_id"]}, limit=1))
+    profile = _one(_data(
+        _session_client()
+        .table("profiles")
+        .select("*")
+        .eq("id", session["user_id"])
+        .limit(1)
+        .execute()
+    ))
     return _cloud_user_from_profile(profile) if profile else None
 
 
 def revoke_auth_session(token: str) -> None:
     if token:
-        _update(
-            "app_sessions",
-            {"revoked_at": datetime.utcnow().isoformat()},
-            filters={"token_hash": _hash_session_token(token)},
-        )
+        _session_client().table("app_sessions").update({
+            "revoked_at": datetime.utcnow().isoformat(),
+        }).eq("token_hash", _hash_session_token(token)).execute()
 
 
 def record_user_consent(

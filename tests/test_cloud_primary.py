@@ -34,6 +34,17 @@ class CloudBackendTests(unittest.TestCase):
             with self.assertRaises(supabase_primary.CloudDatabaseUnavailable):
                 supabase_primary._scoped_filters("properties")
 
+    def test_cloud_sessions_always_use_server_client(self):
+        from pricepilot.services import supabase_primary
+
+        server_client = object()
+        with patch.object(supabase_primary, "has_supabase_auth_session", return_value=True), \
+             patch.object(supabase_primary, "get_supabase_admin_client", return_value=server_client), \
+             patch.object(supabase_primary, "get_supabase_account_client") as account_client:
+            self.assertIs(supabase_primary._session_client(), server_client)
+
+        account_client.assert_not_called()
+
     def test_cutover_schema_contains_cloud_primary_contract(self):
         root = Path(__file__).resolve().parents[1]
         sql = (root / "supabase" / "cloud_primary_cutover.sql").read_text(encoding="utf-8").lower()
