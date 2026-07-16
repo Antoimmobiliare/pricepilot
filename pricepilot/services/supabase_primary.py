@@ -21,6 +21,7 @@ from pricepilot.core.data_backend import CloudDatabaseUnavailable, server_runtim
 from pricepilot.core.supabase_client import (
     get_supabase_account_client,
     get_supabase_admin_client,
+    get_supabase_service_role_key,
     has_supabase_auth_session,
 )
 
@@ -81,10 +82,15 @@ def _session_client() -> Any:
     tabella: queste operazioni restano nel processo server tramite service
     role.
     """
+    service_role_key = get_supabase_service_role_key()
+    if not service_role_key:
+        raise CloudDatabaseUnavailable(
+            "SUPABASE_SERVICE_ROLE_KEY necessaria per gestire le sessioni cloud."
+        )
     client = get_supabase_admin_client()
     if client is None:
         raise CloudDatabaseUnavailable(
-            "SUPABASE_SERVICE_ROLE_KEY necessaria per gestire le sessioni cloud."
+            "SUPABASE_SERVICE_ROLE_KEY presente ma non valida: usa la chiave legacy service_role di Supabase."
         )
     return client
 

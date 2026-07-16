@@ -39,6 +39,7 @@ class CloudBackendTests(unittest.TestCase):
 
         server_client = object()
         with patch.object(supabase_primary, "has_supabase_auth_session", return_value=True), \
+             patch.object(supabase_primary, "get_supabase_service_role_key", return_value="server-key"), \
              patch.object(supabase_primary, "get_supabase_admin_client", return_value=server_client), \
              patch.object(supabase_primary, "get_supabase_account_client") as account_client:
             self.assertIs(supabase_primary._session_client(), server_client)
