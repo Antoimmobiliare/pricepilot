@@ -60,7 +60,7 @@ from pricepilot.core.database import (
     get_guardrail_policy, update_guardrail_policy,
     get_notification_preferences, update_notification_preferences,
     get_notification_log,
-    save_telegram_link, revoke_telegram_link,
+    save_telegram_link, revoke_telegram_link, get_telegram_link_by_property,
     get_property_integrations, upsert_property_integration, delete_property_integration,
     get_current_price_for_date, get_price_calendar, upsert_calendar_price,
     get_telegram_approvals, record_telegram_approval,
@@ -78,6 +78,121 @@ init_db()
 def current_account_id() -> int:
     return get_current_account_id()
 
+
+# Cache only account-scoped dashboard reads for a few seconds. This avoids
+# repeating the same Supabase requests on every Streamlit rerun.
+_DASHBOARD_CACHE_TTL_SECONDS = 12
+
+
+def _invalidate_dashboard_read_cache() -> None:
+    st.cache_data.clear()
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_properties_for_account(account_id: int) -> list[dict]:
+    return list_properties(account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_account_for_dashboard(account_id: int) -> dict | None:
+    return get_account(int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_property_for_dashboard(property_id: int, account_id: int) -> dict | None:
+    return get_property_by_id(int(property_id), account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_summary_stats_for_account(account_id: int) -> dict:
+    return get_summary_stats(account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_account_readiness(account_id: int) -> dict:
+    return account_readiness(int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_last_operation_run(account_id: int) -> dict | None:
+    return get_last_operation_run(account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_operation_runs(account_id: int, limit: int) -> list[dict]:
+    return get_operation_runs(limit=int(limit), account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_decision_log(
+    account_id: int,
+    *,
+    limit: int,
+    property_id: int | None = None,
+) -> list[dict]:
+    return get_decision_log(
+        account_id=int(account_id),
+        property_id=int(property_id) if property_id is not None else None,
+        limit=int(limit),
+    )
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_pending_approvals(account_id: int, property_id: int | None = None) -> list[dict]:
+    return get_pending_approvals(
+        account_id=int(account_id),
+        property_id=int(property_id) if property_id is not None else None,
+    )
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_market_history(account_id: int, property_id: int, limit: int) -> list[dict]:
+    return get_market_history(
+        account_id=int(account_id), property_id=int(property_id), limit=int(limit)
+    )
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_price_calendar(
+    account_id: int,
+    property_id: int,
+    date_from: str,
+    date_to: str,
+    limit: int,
+) -> list[dict]:
+    return get_price_calendar(
+        account_id=int(account_id),
+        property_id=int(property_id),
+        date_from=str(date_from),
+        date_to=str(date_to),
+        limit=int(limit),
+    )
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_telegram_approvals(account_id: int, limit: int) -> list[dict]:
+    return get_telegram_approvals(limit=int(limit), account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_property_integrations(property_id: int) -> list[dict]:
+    return get_property_integrations(int(property_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_price_updates(property_ids: tuple[int, ...], limit: int) -> list[dict]:
+    return get_price_updates([int(property_id) for property_id in property_ids], limit=int(limit))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_notification_preferences(account_id: int) -> dict:
+    return get_notification_preferences(account_id=int(account_id))
+
+
+@st.cache_data(ttl=_DASHBOARD_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_telegram_link(property_id: int) -> dict | None:
+    return get_telegram_link_by_property(int(property_id))
+
 # ─── Plotly toolbar config (keep zoom, pan, download PNG only) ────────────────
 # Account-scoped Streamlit state guard.
 def reset_account_scoped_state_if_needed():
@@ -87,6 +202,7 @@ def reset_account_scoped_state_if_needed():
         return
 
     st.session_state["_pp_active_account_id"] = account_id
+    _invalidate_dashboard_read_cache()
 
     exact_keys = {
         "active_prop_id",
@@ -146,7 +262,7 @@ def reset_property_pricing_widget_state(
     sidebar: bool = True,
     pricing_tab: bool = True,
 ) -> None:
-    """Forza i widget non appena usati a rileggere i limiti salvati sulla proprieta."""
+    """Forza i widget non appena usati a rileggere i limiti salvati sulla proprietà."""
     if not prop_id:
         return
     keys = []
@@ -226,7 +342,7 @@ def _price_limit_state_keys(prop_id: int | str) -> tuple[str, str, str]:
 
 
 def _remember_saved_price_limits(prop_id: int | str, min_price: float, max_price: float) -> None:
-    """Allinea la cache UI ai limiti salvati della proprieta."""
+    """Allinea la cache UI ai limiti salvati della proprietà."""
     min_value = float(min_price)
     max_value = float(max_price)
     min_key, max_key, saved_key = _price_limit_state_keys(prop_id)
@@ -283,7 +399,7 @@ def save_synced_price_limits(
     reset_pricing_tab: bool = True,
     pricing_rules: dict | None = None,
 ) -> dict | None:
-    """Salva min/max su proprieta, config e session_state in un unico punto."""
+    """Salva min/max su proprietà, config e session_state in un unico punto."""
     prop_id = int(prop["id"])
     min_value = float(min_price)
     max_value = float(max_price)
@@ -322,7 +438,7 @@ def save_synced_price_limits(
         sidebar=reset_sidebar,
         pricing_tab=reset_pricing_tab,
     )
-    st.cache_data.clear()
+    _invalidate_dashboard_read_cache()
     return updated_prop
 
 
@@ -1078,7 +1194,7 @@ def render_sidebar():
 
         # ── Selettore proprietà attiva ────────────────────────────────────────
         account_id = current_account_id()
-        props = list_properties(account_id=account_id)
+        props = _cached_properties_for_account(account_id)
         active_prop = None
         if props:
             st.markdown("### 🏠 Proprietà attiva")
@@ -1118,8 +1234,7 @@ def render_sidebar():
                 )
                 # Stato Telegram
                 try:
-                    from pricepilot.core.database import get_telegram_link_by_property
-                    tg_link = get_telegram_link_by_property(active_id)
+                    tg_link = _cached_telegram_link(active_id)
                     if tg_link and tg_link.get("chat_id"):
                         uname = tg_link.get("telegram_username", "")
                         st.markdown(
@@ -1173,9 +1288,9 @@ def render_sidebar():
 
         st.markdown("### 💰 Prezzi")
         if active_prop:
-            st.caption("Stessi limiti della tab Prezzi per la proprieta attiva.")
+            st.caption("Stessi limiti della tab Prezzi per la proprietà attiva.")
         else:
-            st.caption("Crea una proprieta per salvare limiti specifici.")
+            st.caption("Crea una proprietà per salvare limiti specifici.")
         sidebar_min_value, sidebar_max_value = get_synced_price_limits(active_prop, cfg)
         if active_prop:
             _sidebar_flash = st.session_state.pop(f"pp_sidebar_price_flash_{active_prop['id']}", None)
@@ -1271,7 +1386,7 @@ def render_sidebar():
                 )
             else:
                 save_config(new_cfg)
-                st.cache_data.clear()
+                _invalidate_dashboard_read_cache()
                 st.session_state["pp_sidebar_price_flash_global"] = "Configurazione salvata."
             st.rerun()
 
@@ -1716,13 +1831,13 @@ def _plan_action_copy(plan: str) -> tuple[str, str, str]:
     if plan == "plus":
         return (
             "Plus",
-            "PricePilot invia proposta e motivazione su Telegram. L'utente approva, poi la sync OTA sara gestita dal channel manager.",
+            "PricePilot invia proposta e motivazione su Telegram. L'utente approva, poi la sync OTA sarà gestita dal channel manager.",
             "Approvazione Telegram",
         )
     if plan == "pro":
         return (
             "Pro",
-            "PricePilot lavora in autonomia con guardrail, report e notifiche operative. La sync reale arrivera con channel manager/API.",
+            "PricePilot lavora in autonomia con guardrail, report e notifiche operative. La sync reale arriverà con channel manager/API.",
             "Autopilot",
         )
     return (
@@ -1799,9 +1914,9 @@ def _clear_onboarding_state():
 
 def _tab_onboarding_v2(surface: str = "main"):
     account_id = current_account_id()
-    account = get_account(account_id) or {
+    account = _cached_account_for_dashboard(account_id) or {
         "id": account_id,
-        "name": "La mia attivita",
+        "name": "La mia attività",
         "plan": "free",
         "billing_status": "dev",
     }
@@ -1814,8 +1929,8 @@ def _tab_onboarding_v2(surface: str = "main"):
     st.session_state[step_key] = step
 
     labels = {
-        1: "Attivita",
-        2: "Proprieta",
+        1: "Attività",
+        2: "Proprietà",
         3: "Piano",
         4: "Telegram",
     }
@@ -1850,38 +1965,44 @@ def _tab_onboarding_v2(surface: str = "main"):
         if step == 1:
             st.markdown(
                 '<div class="onb-step-label">Passo 1 di 4</div>'
-                '<div class="onb-title">Partiamo dalla tua attivita</div>'
+                '<div class="onb-title">Partiamo dalla tua attività</div>'
                 '<div class="onb-desc">Questi dati servono per intestare il tuo account '
-                'e creare la prima proprieta da monitorare.</div>',
+                'e creare la prima proprietà da monitorare.</div>',
                 unsafe_allow_html=True,
             )
 
-            business_name = st.text_input(
-                "Nome attivita",
-                value=st.session_state.get("onb_business_name", account.get("name") or "La mia attivita"),
-                placeholder="Es. Rossi Apartments",
-                key=widget_key("onb_business_name_input"),
-            )
-            property_name = st.text_input(
-                "Nome prima proprieta",
-                value=st.session_state.get("onb_property_name", ""),
-                placeholder="Es. Appartamento Centro Roma",
-                key=widget_key("onb_property_name_input"),
-            )
-            city_zone = st.text_input(
-                "Citta / zona",
-                value=st.session_state.get("onb_city_zone", ""),
-                placeholder="Es. Roma, Trastevere",
-                key=widget_key("onb_city_zone_input"),
-            )
+            with st.form(key=widget_key("onb_step1_form"), border=False):
+                business_name = st.text_input(
+                    "Nome attività",
+                    value=st.session_state.get("onb_business_name", account.get("name") or "La mia attività"),
+                    placeholder="Es. Rossi Apartments",
+                    key=widget_key("onb_business_name_input"),
+                )
+                property_name = st.text_input(
+                    "Nome prima proprietà",
+                    value=st.session_state.get("onb_property_name", ""),
+                    placeholder="Es. Appartamento Centro Roma",
+                    key=widget_key("onb_property_name_input"),
+                )
+                city_zone = st.text_input(
+                    "Città / zona",
+                    value=st.session_state.get("onb_city_zone", ""),
+                    placeholder="Es. Roma, Trastevere",
+                    key=widget_key("onb_city_zone_input"),
+                )
+                step_one_submitted = st.form_submit_button(
+                    "Avanti",
+                    type="primary",
+                    use_container_width=True,
+                )
 
-            if st.button("Avanti", type="primary", use_container_width=True, key=widget_key("onb_step1_next")):
+            if step_one_submitted:
                 if not business_name.strip():
-                    st.error("Inserisci il nome della tua attivita.")
+                    st.error("Inserisci il nome della tua attività.")
                 elif not property_name.strip():
-                    st.error("Inserisci il nome della prima proprieta.")
+                    st.error("Inserisci il nome della prima proprietà.")
                 elif not city_zone.strip():
-                    st.error("Inserisci almeno citta o zona.")
+                    st.error("Inserisci almeno città o zona.")
                 else:
                     st.session_state["onb_business_name"] = business_name.strip()
                     st.session_state["onb_property_name"] = property_name.strip()
@@ -1894,7 +2015,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                 '<div class="onb-step-label">Passo 2 di 4</div>'
                 '<div class="onb-title">Canali e prezzi base</div>'
                 '<div class="onb-desc">PricePilot usa questi limiti come guardrail: '
-                'il prezzo consigliato non uscira da questa fascia.</div>',
+                'il prezzo consigliato non uscirà da questa fascia.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -1983,7 +2104,7 @@ def _tab_onboarding_v2(surface: str = "main"):
             st.markdown(
                 '<div class="onb-step-label">Passo 3 di 4</div>'
                 '<div class="onb-title">Conferma il piano attivo</div>'
-                '<div class="onb-desc">Il piano viene letto dall&apos;account. In futuro sara impostato dal pagamento, non dalla dashboard.</div>',
+                '<div class="onb-desc">Il piano viene letto dall&apos;account. In futuro sarà impostato dal pagamento, non dalla dashboard.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -2008,7 +2129,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                         update_account_profile(
                             account_id,
                             {
-                                "name": st.session_state.get("onb_business_name", "La mia attivita"),
+                                "name": st.session_state.get("onb_business_name", "La mia attività"),
                             },
                         )
                         prop_data = {
@@ -2030,7 +2151,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                         else:
                             prop = create_property(prop_data)
                         if not prop:
-                            raise ValueError("Proprieta non trovata.")
+                            raise ValueError("Proprietà non trovata.")
                         prop_id = int(prop["id"])
                         st.session_state["active_prop_id"] = prop_id
                         _remember_saved_price_limits(
@@ -2068,6 +2189,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                                 "is_primary": 1 if platform == primary else 0,
                             })
 
+                        _invalidate_dashboard_read_cache()
                         st.session_state[step_key] = 4
                         st.rerun()
                     except Exception as exc:
@@ -2076,7 +2198,7 @@ def _tab_onboarding_v2(surface: str = "main"):
         elif step == 4:
             plan = st.session_state.get("onb_plan", account.get("plan") or "free")
             prop_id = st.session_state.get("onb_property_id") or st.session_state.get("active_prop_id")
-            property_name = st.session_state.get("onb_property_name", "La tua proprieta")
+            property_name = st.session_state.get("onb_property_name", "La tua proprietà")
             mode_text = {
                 "free": "ricevere consigli motivati",
                 "plus": "approvare le modifiche da Telegram",
@@ -2087,7 +2209,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                 '<div class="onb-step-label">Passo 4 di 4</div>'
                 '<div class="onb-title">Collega Telegram</div>'
                 f'<div class="onb-desc">Telegram ti serve per {mode_text}. '
-                'Puoi saltare questo passaggio e collegarlo piu tardi.</div>',
+                'Puoi saltare questo passaggio e collegarlo più tardi.</div>',
                 unsafe_allow_html=True,
             )
 
@@ -2119,9 +2241,9 @@ def _tab_onboarding_v2(surface: str = "main"):
             st.markdown(
                 f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
                 f'border-radius:12px;padding:16px 18px;margin-top:12px">'
-                f'<div class="onb-summary-row"><span class="onb-summary-label">Attivita</span>'
+                f'<div class="onb-summary-row"><span class="onb-summary-label">Attività</span>'
                 f'<span class="onb-summary-value">{_html.escape(st.session_state.get("onb_business_name", account.get("name", "")))}</span></div>'
-                f'<div class="onb-summary-row"><span class="onb-summary-label">Proprieta</span>'
+                f'<div class="onb-summary-row"><span class="onb-summary-label">Proprietà</span>'
                 f'<span class="onb-summary-value">{_html.escape(property_name)}</span></div>'
                 f'<div class="onb-summary-row"><span class="onb-summary-label">Piano</span>'
                 f'<span class="onb-summary-value">{get_plan(plan)["label"]}</span></div>'
@@ -2256,12 +2378,12 @@ def tab_home(cfg: dict):
     import json as _json
 
     account_id = current_account_id()
-    props = list_properties(account_id=account_id)
+    props = _cached_properties_for_account(account_id)
 
     today = date.today()
     now   = datetime.now()
-    last_run = get_last_operation_run(account_id)
-    account = get_account(account_id) or {"plan": "free"}
+    last_run = _cached_last_operation_run(account_id)
+    account = _cached_account_for_dashboard(account_id) or {"plan": "free"}
     current_plan = str(account.get("plan", "free")).lower()
     current_user = get_current_user() or {}
     can_run_manual_cycle = get_billing_provider().can_run_manual_cycle(
@@ -2361,7 +2483,7 @@ def tab_home(cfg: dict):
         if len(_run_ts) >= 16:
             _last_update_str = _run_ts[11:16]
     try:
-        _last_dec_ts = get_decision_log(property_id=None, limit=1, account_id=account_id)
+        _last_dec_ts = _cached_decision_log(account_id, limit=1)
         if not _last_update_str and _last_dec_ts:
             _ts_raw = str(_last_dec_ts[0].get("timestamp", ""))
             if len(_ts_raw) >= 16:
@@ -2509,7 +2631,7 @@ def tab_home(cfg: dict):
                 outcome = run_pricing_cycle(account_id=account_id, source="dashboard_manual")
             run = outcome.get("run") or {}
             if outcome.get("skipped"):
-                st.warning("Ciclo non avviato: ne esiste gia uno in esecuzione.")
+                st.warning("Ciclo non avviato: ne esiste già uno in esecuzione.")
             else:
                 st.success(f"Ciclo completato: {run.get('decisions_count', 0)} decisioni generate.")
             st.rerun()
@@ -2528,9 +2650,9 @@ def tab_home(cfg: dict):
                 f"prossimo controllo stimato alle {_next_update_str}"
             )
         else:
-            st.caption("Il ciclo automatico e pronto: eseguilo una volta per iniziare a popolare run, audit e decisioni.")
+            st.caption("Il ciclo automatico è pronto: eseguilo una volta per iniziare a popolare run, audit e decisioni.")
         if _run_is_running:
-            st.warning("Ciclo gia in esecuzione: PricePilot blocca avvii doppi finche non termina.")
+            st.warning("Ciclo già in esecuzione: PricePilot blocca avvii doppi finché non termina.")
         elif not can_run_manual_cycle:
             st.caption("Il ciclo manuale e disponibile solo in test/admin. In produzione parte dallo scheduler.")
 
@@ -2538,7 +2660,7 @@ def tab_home(cfg: dict):
     # PART 2 — SUMMARY METRIC CARDS
     # ══════════════════════════════════════════════════════════════════════════
     with st.expander("Storico cicli pricing", expanded=False):
-        runs = get_operation_runs(limit=12, account_id=account_id)
+        runs = _cached_operation_runs(account_id, limit=12)
         if not runs:
             st.info("Nessun ciclo registrato.")
         else:
@@ -2566,10 +2688,10 @@ def tab_home(cfg: dict):
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
             if latest_errors:
-                st.markdown("**Ultimi errori per proprieta**")
+                st.markdown("**Ultimi errori per proprietà**")
                 for err in latest_errors[:5]:
                     st.caption(
-                        f"{err.get('property_name') or 'Proprieta'} "
+                f"{err.get('property_name') or 'Proprietà'} "
                         f"(ID {err.get('property_id', '-')}) · {err.get('error', '')}"
                     )
 
@@ -2783,7 +2905,7 @@ def tab_home(cfg: dict):
 
         # Prezzo suggerito oggi (ultimo dal log, fallback midpoint)
         try:
-            _last_dec  = get_decision_log(property_id=prop["id"], limit=1, account_id=account_id)
+            _last_dec = _cached_decision_log(account_id, property_id=prop["id"], limit=1)
             today_price = float(_last_dec[0]["new_price"]) if _last_dec else None
         except Exception:
             today_price = None
@@ -2792,7 +2914,7 @@ def tab_home(cfg: dict):
 
         # Prezzo medio dalle decisioni recenti
         try:
-            _hist = get_decision_log(property_id=prop["id"], limit=30, account_id=account_id)
+            _hist = _cached_decision_log(account_id, property_id=prop["id"], limit=30)
             _prices_h = [float(d["new_price"]) for d in _hist if d.get("new_price")]
             avg_price = round(sum(_prices_h) / len(_prices_h), 0) if _prices_h else (
                 float(prop["min_price"] + prop["max_price"]) / 2
@@ -2801,8 +2923,7 @@ def tab_home(cfg: dict):
             avg_price = float(prop["min_price"] + prop["max_price"]) / 2
 
         try:
-            from pricepilot.core.database import get_telegram_link_by_property
-            tg = get_telegram_link_by_property(prop["id"])
+            tg = _cached_telegram_link(prop["id"])
             tg_status = "🔔" if (tg and tg.get("chat_id")) else "🔕"
         except Exception:
             tg_status = "—"
@@ -2882,7 +3003,7 @@ def tab_home(cfg: dict):
     _MESI_IT = ["gen","feb","mar","apr","mag","giu","lug","ago","set","ott","nov","dic"]
 
     try:
-        recent_log = get_decision_log(property_id=None, limit=6, account_id=account_id)
+        recent_log = _cached_decision_log(account_id, limit=6)
         prop_map_d = {p["id"]: p["name"] for p in props}
 
         if not recent_log:
@@ -3091,7 +3212,7 @@ def tab_home(cfg: dict):
 
     # Alert: pending approvals
     try:
-        pending = get_pending_approvals(account_id=account_id)
+        pending = _cached_pending_approvals(account_id)
         if pending:
             _n_p = len(pending)
             alerts.append({
@@ -3314,7 +3435,7 @@ def _build_why_block(
             m = _re.search(r"clamped_up\s*\(([\d.]+)->([\d.]+),\s*max \+([\d.]+)%\)", chunk)
             if m:
                 readable.append(
-                    "Prezzo limitato per sicurezza: PricePilot avrebbe aumentato di piu, "
+                    "Prezzo limitato per sicurezza: PricePilot avrebbe aumentato di più, "
                     f"ma applica massimo +{m.group(3)}% per singolo aggiornamento "
                     f"({_money(m.group(1))} -> {_money(m.group(2))})."
                 )
@@ -3322,7 +3443,7 @@ def _build_why_block(
             m = _re.search(r"clamped_down\s*\(([\d.]+)->([\d.]+),\s*max -([\d.]+)%\)", chunk)
             if m:
                 readable.append(
-                    "Prezzo limitato per sicurezza: PricePilot avrebbe abbassato di piu, "
+                    "Prezzo limitato per sicurezza: PricePilot avrebbe abbassato di più, "
                     f"ma applica massimo -{m.group(3)}% per singolo aggiornamento "
                     f"({_money(m.group(1))} -> {_money(m.group(2))})."
                 )
@@ -3330,7 +3451,7 @@ def _build_why_block(
             m = _re.search(r"dynamic_floor=([\d.]+)", chunk)
             if m:
                 readable.append(
-                    "Prezzo minimo dinamico applicato: in giorni con piu domanda "
+                    "Prezzo minimo dinamico applicato: in giorni con più domanda "
                     f"PricePilot non scende sotto {_money(m.group(1))}."
                 )
                 continue
@@ -3349,7 +3470,7 @@ def _build_why_block(
         "base":           ("🏠", "Prezzo base"),
         "start":          ("🏠", "Prezzo di partenza"),
         "seasonality":    ("📅", "Stagionalità"),
-        "season_factor":  ("📅", "Stagionalita"),
+        "season_factor":  ("📅", "Stagionalità"),
         "weekend":        ("📆", "Bonus weekend"),
         "weekend_boost":  ("📆", "Weekend"),
         "event":          ("🎉", "Evento locale"),
@@ -3468,7 +3589,7 @@ def tab_pricing(cfg: dict):
     st.caption("Configura come PricePilot ottimizza i prezzi per ogni tua proprietà.")
 
     # ── Property selector ──────────────────────────────────────────────────────
-    _ps_props = list_properties(account_id=current_account_id())
+    _ps_props = _cached_properties_for_account(current_account_id())
     if not _ps_props:
         st.info("Nessuna proprietà configurata. Vai al tab **🏠 Home** per aggiungere la tua prima proprietà.")
         return
@@ -3482,7 +3603,7 @@ def tab_pricing(cfg: dict):
     _sel_prop = next(p for p in _ps_props if p["id"] == _active_id)
     _sel_id   = _sel_prop["id"]
     apply_pending_property_pricing_widget_reset(_sel_id, pricing_tab=True)
-    st.caption(f"Proprieta attiva: {_sel_prop.get('name', '')}. Cambiala dalla sidebar.")
+    st.caption(f"Proprietà attiva: {_sel_prop.get('name', '')}. Cambiala dalla sidebar.")
 
     # ── Current values from DB ─────────────────────────────────────────────────
     _cur_strategy = _sel_prop.get("strategy", "balanced")
@@ -3566,7 +3687,7 @@ def tab_pricing(cfg: dict):
             update_property(_sel_id, {"strategy": _new_strategy})
             st.session_state["active_prop_id"] = _sel_id
             queue_property_pricing_widget_reset(_sel_id, sidebar=True, pricing_tab=False)
-            st.cache_data.clear()
+            _invalidate_dashboard_read_cache()
             st.rerun()
         except Exception as _se:
             st.error(f"Impossibile salvare la strategia: {_se}")
@@ -3810,7 +3931,7 @@ def tab_analytics(cfg: dict):
     st.markdown('<div class="section-title">🎯 Qualità delle Decisioni di Pricing</div>',
                 unsafe_allow_html=True)
     try:
-        _v2_log = get_decision_log(property_id=None, limit=500, account_id=account_id)
+        _v2_log = _cached_decision_log(account_id, limit=500)
     except Exception:
         _v2_log = []
 
@@ -4146,7 +4267,7 @@ def _decision_flow_status(decision: dict) -> tuple[str, str, str, str, str]:
         return (
             "approved_sync",
             "Approvata, da sincronizzare",
-            "Approvata dall'utente: restera qui finche non colleghiamo channel manager/API.",
+            "Approvata dall'utente: resterà qui finché non colleghiamo channel manager/API.",
             "#92400e",
             "#fffbeb",
         )
@@ -4183,9 +4304,9 @@ def _decision_pct(old_price: float, new_price: float) -> float:
 
 def _decision_prop_name(decision: dict, prop_map: dict[int, str]) -> str:
     try:
-        return prop_map.get(int(decision.get("property_id") or 0), "Proprieta")
+        return prop_map.get(int(decision.get("property_id") or 0), "Proprietà")
     except Exception:
-        return "Proprieta"
+        return "Proprietà"
 
 
 def _render_decision_flow_card(
@@ -4318,7 +4439,7 @@ def _render_decision_flow_card(
                 st.toast("Decisione rifiutata.", icon="❌")
                 st.rerun()
         with col_note:
-            st.caption("Nel piano Plus l'approvazione arriva anche da Telegram. Se il channel manager non e configurato, la decisione resta pronta per aggiornamento manuale.")
+            st.caption("Nel piano Plus l'approvazione arriva anche da Telegram. Se il channel manager non è configurato, la decisione resta pronta per l'aggiornamento manuale.")
 
 
 def _render_decision_list(
@@ -4343,11 +4464,11 @@ def _tab_decisions_v2(cfg: dict):
         "prezzi approvati da sincronizzare, prezzi applicati e decisioni rifiutate."
     )
 
-    props = list_properties(account_id=account_id)
+    props = _cached_properties_for_account(account_id)
     prop_map = {int(p["id"]): p["name"] for p in props}
 
     try:
-        raw_log = get_decision_log(property_id=None, limit=500, account_id=account_id)
+        raw_log = _cached_decision_log(account_id, limit=500)
     except Exception:
         raw_log = []
 
@@ -4360,7 +4481,7 @@ def _tab_decisions_v2(cfg: dict):
     f1, f2 = st.columns([2, 1])
     prop_names = ["Tutte"] + [p["name"] for p in props]
     with f1:
-        selected_prop = st.selectbox("Proprieta", prop_names, key="decision_flow_prop_filter")
+        selected_prop = st.selectbox("Proprietà", prop_names, key="decision_flow_prop_filter")
     with f2:
         n_rows = st.slider("Decisioni da caricare", 10, 200, 60, key="decision_flow_limit")
 
@@ -4393,8 +4514,8 @@ def _tab_decisions_v2(cfg: dict):
             '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
             'padding:12px 14px;margin:10px 0 14px;color:#475569;font-size:.88rem">'
             '<b>Come leggerla:</b> Free genera consigli, Plus crea decisioni da approvare, '
-            'Pro prepara l autopilot. Finche non colleghiamo channel manager/API, tutto cio che '
-            'e approvato ma non applicato resta in "Da sincronizzare".'
+            "Pro prepara l'autopilot. Finché non colleghiamo channel manager/API, tutto ciò che "
+            'è approvato ma non applicato resta in "Da sincronizzare".'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -4437,7 +4558,7 @@ def _tab_decisions_v2(cfg: dict):
                         "Nessuna decisione rifiutata.",
                     )
     else:
-        st.warning("Sto usando lo storico legacy: le nuove decisioni avranno stati piu chiari.")
+        st.warning("Sto usando lo storico legacy: le nuove decisioni avranno stati più chiari.")
         df_show = df_legacy.sort_values("timestamp", ascending=False).head(n_rows)
         st.dataframe(df_show, use_container_width=True, hide_index=True)
 
@@ -4464,11 +4585,11 @@ def tab_decisions(cfg: dict):
     st.caption("Storico completo di tutte le decisioni di pricing suggerite o applicate da PricePilot.")
 
     # ── Prova a caricare dal decision_log v2 (più ricco) ─────────────────────
-    props = list_properties(account_id=account_id)
+    props = _cached_properties_for_account(account_id)
     prop_map = {p["id"]: p["name"] for p in props}
 
     try:
-        raw_log = get_decision_log(property_id=None, limit=500, account_id=account_id)
+        raw_log = _cached_decision_log(account_id, limit=500)
     except Exception:
         raw_log = []
 
@@ -4840,14 +4961,14 @@ def tab_properties():
                 unsafe_allow_html=True)
 
     account_id = current_account_id()
-    props = list_properties(account_id=account_id)
+    props = _cached_properties_for_account(account_id)
 
     if not props:
-        st.caption("Configura la prima proprieta: dati essenziali, prezzi, piano e Telegram in pochi passaggi.")
+        st.caption("Configura la prima proprietà: dati essenziali, prezzi, piano e Telegram in pochi passaggi.")
         _tab_onboarding_v2("properties")
         return
 
-    account = get_account(account_id) or {"id": account_id, "name": "La mia attivita", "plan": "free", "billing_status": "dev"}
+    account = _cached_account_for_dashboard(account_id) or {"id": account_id, "name": "La mia attività", "plan": "free", "billing_status": "dev"}
     current_plan = account.get("plan", "free")
     plan_info = get_plan(current_plan)
     billing_status_labels = {
@@ -4868,8 +4989,8 @@ def tab_properties():
     a1, a2, a3 = st.columns([2, 2, 1])
     with a1:
         account_name = st.text_input(
-            "Nome attivita",
-            value=account.get("name", "La mia attivita"),
+            "Nome attività",
+            value=account.get("name", "La mia attività"),
             key="account_name_input",
         )
     with a2:
@@ -4877,20 +4998,21 @@ def tab_properties():
     with a3:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("Salva account", key="account_profile_save", use_container_width=True):
-            update_account_profile(account_id, {"name": account_name.strip() or "La mia attivita"})
+            update_account_profile(account_id, {"name": account_name.strip() or "La mia attività"})
             for prop in props:
                 update_property(prop["id"], {
                     **prop,
                     "plan": current_plan,
                     "sync_mode": effective_sync_mode(current_plan, prop.get("sync_mode")),
                 })
+            _invalidate_dashboard_read_cache()
             st.toast("Account aggiornato.", icon="✅")
             st.rerun()
         _render_billing_action(account_id, account, key_prefix="account_plan_upgrade")
 
     st.caption(plan_info["description"])
 
-    readiness = account_readiness(account_id)
+    readiness = _cached_account_readiness(account_id)
     r1, r2, r3 = st.columns(3)
     with r1:
         st.metric("Configurazione pronta", f"{readiness['score']:.0f}%")
@@ -4900,7 +5022,7 @@ def tab_properties():
         st.caption("Elementi importanti non ancora configurati.")
     with r3:
         st.metric("Stato abbonamento", billing_label)
-        st.caption("In test il pagamento reale non e ancora richiesto.")
+        st.caption("In test il pagamento reale non è ancora richiesto.")
 
     if billing_status == "dev":
         st.info(
@@ -4909,12 +5031,12 @@ def tab_properties():
         )
 
     with st.expander("Checklist configurazione", expanded=readiness["score"] < 80):
-        st.caption("Questa lista mostra cosa e pronto prima di collegare channel manager/API reali.")
+        st.caption("Questa lista mostra cosa è pronto prima di collegare channel manager/API reali.")
         for check in readiness["checks"]:
             icon = "✅" if check["ok"] else ("⚠️" if check["required"] else "ℹ️")
             st.markdown(f"{icon} **{check['label']}** · {check.get('detail', '')}")
 
-    prefs = get_notification_preferences(account_id=account_id)
+    prefs = _cached_notification_preferences(account_id)
     with st.expander("Notifiche Telegram e report", expanded=False):
         st.caption("Scegli quali messaggi PricePilot può inviare. Se Telegram non è collegato, le notifiche vengono registrate ma non inviate.")
         n1, n2, n3 = st.columns(3)
@@ -4977,20 +5099,20 @@ def tab_properties():
             "manual_lock": "Prezzo bloccato manualmente",
             "demo": "Dato demo",
             "price_range_midpoint": "Stimato da min/max",
-            "property_current_price": "Dato proprieta",
+            "property_current_price": "Dato proprietà",
             "channel_manager": "Channel manager",
             "ota_api": "OTA/API",
         }
         with st.expander("Prezzi attuali", expanded=False):
             st.caption(
-                "Questi sono i prezzi di partenza usati dal motore. Finche non colleghiamo OTA/API "
+                "Questi sono i prezzi di partenza usati dal motore. Finché non colleghiamo OTA/API "
                 "li puoi aggiornare manualmente da qui."
             )
             for p in props:
                 current_price, current_source = get_current_price_for_date(p, today_key)
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1:
-                    st.markdown(f"**{p.get('name', 'Proprieta')}**")
+                    st.markdown(f"**{p.get('name', 'Proprietà')}**")
                     st.caption(source_labels.get(current_source, current_source))
                 with c2:
                     new_current = st.number_input(
@@ -5025,9 +5147,9 @@ def tab_properties():
             "advisory": {"label": "💡 Manuale",  "color": "#6366f1", "bg": "#eef2ff",
                          "desc": "PricePilot suggerirà prezzi ottimali basati su domanda, mercato e occupazione."},
             "approval": {"label": "✅ Approvazione",  "color": "#f59e0b", "bg": "#fffbeb",
-                         "desc": "Conferma su Telegram; sync OTA quando il channel manager sara collegato."},
+                         "desc": "Conferma su Telegram; sync OTA quando il channel manager sarà collegato."},
             "auto":     {"label": "🤖 Automatico",   "color": "#10b981", "bg": "#f0fdf4",
-                         "desc": "Autopilot completo quando sara collegata una sync reale."},
+                         "desc": "Autopilot completo quando sarà collegata una sync reale."},
         }
 
         ncols = min(len(props), 3)
@@ -5038,8 +5160,7 @@ def tab_properties():
             mcfg = mode_cfg.get(mode, mode_cfg["advisory"])
             plan_cfg = get_plan(effective_plan)
             try:
-                from pricepilot.core.database import get_telegram_link_by_property
-                tg = get_telegram_link_by_property(p["id"])
+                tg = _cached_telegram_link(p["id"])
                 tg_status = (f"🔔 @{tg['telegram_username'] or 'collegato'}"
                              if tg and tg.get("chat_id") else "🔕 non collegato")
             except Exception:
@@ -5216,7 +5337,7 @@ def tab_properties():
         _ota_loaded_key = f"ota_loaded_{selected_str}"
         if existing and not st.session_state.get(_ota_loaded_key):
             try:
-                _db_integ = get_property_integrations(existing["id"])
+                _db_integ = _cached_property_integrations(existing["id"])
                 # Mostra solo le secondarie (non la piattaforma principale)
                 _extra_from_db = [
                     {"id": r["id"], "platform": r["platform"],
@@ -5421,7 +5542,7 @@ def tab_properties():
         st.markdown("---")
         st.markdown("##### Piano")
 
-        account = get_account(account_id) or {"plan": "free"}
+        account = _cached_account_for_dashboard(account_id) or {"plan": "free"}
         pf_plan = str(account.get("plan") or "free").lower()
         _render_readonly_plan_box(pf_plan, compact=True)
         _render_billing_action(account_id, account, key_prefix="pf_change_plan")
@@ -5519,7 +5640,7 @@ def tab_properties():
                             sidebar=True,
                             pricing_tab=True,
                         )
-                        st.cache_data.clear()
+                        _invalidate_dashboard_read_cache()
 
                         _ota_extras_key = f"ota_extras_{selected_str}"
                         _del_key        = f"ota_del_ids_{selected_str}"
@@ -5559,6 +5680,7 @@ def tab_properties():
             ):
                 from pricepilot.core.database import delete_property
                 delete_property(existing["id"])
+                _invalidate_dashboard_read_cache()
                 st.warning(f"🗑️ Proprietà **{existing['name']}** eliminata.")
                 st.session_state.pop(draft_key, None)
                 st.session_state[form_key] = 1
@@ -5574,7 +5696,7 @@ def tab_simulator():
                 unsafe_allow_html=True)
     st.markdown("Simula scenari di pricing senza salvare nel database.")
 
-    props = list_properties(account_id=current_account_id())
+    props = _cached_properties_for_account(current_account_id())
     if not props:
         st.warning("Crea prima una proprietà nella tab **🏠 Proprietà**.")
         return
@@ -5733,7 +5855,7 @@ def tab_simulator():
         st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
 
         # ── Market history per proprietà ──────────────────────────────────────
-        mkt_hist = get_market_history(property_id=prop_id, limit=30, account_id=current_account_id())
+        mkt_hist = _cached_market_history(current_account_id(), prop_id, limit=30)
         if mkt_hist:
             st.markdown('<div class="section-title">📈 Storico Mercato (ultimi 30 giorni)</div>',
                         unsafe_allow_html=True)
@@ -5861,7 +5983,7 @@ def tab_calendar(cfg: dict):
     )
 
     # ── Selezione proprietà ───────────────────────────────────────────────────
-    props = list_properties(account_id=current_account_id())
+    props = _cached_properties_for_account(current_account_id())
     if not props:
         st.warning("Crea prima una proprietà nella tab **🏡 Proprietà**.")
         return
@@ -5907,11 +6029,11 @@ def tab_calendar(cfg: dict):
     # ── Genera/preleva dati calendario (cached) ────────────────────────────────
     prices_list = _get_calendar_prices(prop, cfg)
     prices_dict = {p["date_iso"]: p for p in prices_list}
-    stored_calendar = get_price_calendar(
-        account_id=current_account_id(),
-        property_id=sel_pid,
-        date_from=today.isoformat(),
-        date_to=(today + timedelta(days=89)).isoformat(),
+    stored_calendar = _cached_price_calendar(
+        current_account_id(),
+        sel_pid,
+        today.isoformat(),
+        (today + timedelta(days=89)).isoformat(),
         limit=120,
     )
     persisted_overrides = {}
@@ -6541,7 +6663,7 @@ def tab_telegram():
 
     st.markdown("---")
 
-    props = list_properties(account_id=current_account_id())
+    props = _cached_properties_for_account(current_account_id())
     if not props:
         st.warning("Crea prima una proprietà nella tab **🏠 Proprietà**.")
         return
@@ -6558,8 +6680,7 @@ def tab_telegram():
     for prop in props:
         prop_id = prop["id"]
         try:
-            from pricepilot.core.database import get_telegram_link_by_property
-            link = get_telegram_link_by_property(prop_id)
+            link = _cached_telegram_link(prop_id)
         except Exception:
             link = None
 
@@ -6706,7 +6827,7 @@ def tab_telegram():
     st.caption("Decisioni in modalità Approvazione che attendono conferma manuale.")
 
     try:
-        pending   = get_pending_approvals(account_id=current_account_id())
+        pending   = _cached_pending_approvals(current_account_id())
         all_props = props
     except Exception:
         pending   = []
@@ -6799,13 +6920,13 @@ def tab_telegram():
 
     st.markdown('<div class="section-title">Storico approvazioni</div>',
                 unsafe_allow_html=True)
-    history = get_telegram_approvals(limit=30, account_id=current_account_id())
+    history = _cached_telegram_approvals(current_account_id(), limit=30)
     if history:
         rows = []
         for item in history:
             rows.append({
                 "Quando": str(item.get("timestamp", ""))[:16],
-                "Proprieta": item.get("property_name") or f"#{item.get('property_id') or '-'}",
+                "Proprietà": item.get("property_name") or f"#{item.get('property_id') or '-'}",
                 "Azione": "Approvato" if item.get("action") == "approve" else "Rifiutato",
                 "Stato": item.get("status", ""),
                 "Origine": "Telegram" if item.get("source") == "telegram" else "Dashboard",
@@ -6837,7 +6958,7 @@ def tab_integrations():
         unsafe_allow_html=True,
     )
 
-    props = list_properties(account_id=current_account_id())
+    props = _cached_properties_for_account(current_account_id())
     if not props:
         st.warning("Crea prima una proprietà nella tab 🏠 Proprietà.")
         return
@@ -6895,7 +7016,7 @@ def tab_integrations():
 
         # Ultimo aggiornamento: legge dal repository operativo (SQLite o cloud).
         try:
-            updates = get_price_updates([int(prop["id"])], limit=1)
+            updates = _cached_price_updates((int(prop["id"]),), limit=1)
             last_upd = updates[0] if updates else None
         except Exception:
             last_upd = None
@@ -7019,7 +7140,7 @@ def tab_integrations():
         with t2:
             st.caption(
                 "Il test legge la lista appartamenti da Smoobu. "
-                "Per aggiornare prezzi serve anche mappare il Listing ID/Apartment ID sulla proprieta."
+                "Per aggiornare i prezzi serve anche mappare il Listing ID/Apartment ID sulla proprietà."
             )
 
     with st.expander("⚙️ Come attivare le integrazioni Live"):
@@ -7073,11 +7194,11 @@ def tab_auto_log():
         "I record con badge 🟡 Sim. sono stati simulati (non inviati alla piattaforma reale)."
     )
 
-    props = list_properties(account_id=current_account_id())
+    props = _cached_properties_for_account(current_account_id())
     prop_map = {p["id"]: p["name"] for p in props}
     prop_ids = [int(p["id"]) for p in props]
     if not prop_ids:
-        st.info("Nessuna proprieta configurata.")
+        st.info("Nessuna proprietà configurata.")
         return
 
     # ── Filtri ────────────────────────────────────────────────────────────────
@@ -7099,8 +7220,10 @@ def tab_auto_log():
 
     # ── Leggi repository operativo + decisioni applicate (per il motivo) ────
     try:
-        rows = get_price_updates(prop_ids, limit=int(limit_rows))
-        decisions = get_decision_log(limit=5000, account_id=current_account_id())
+        rows = _cached_price_updates(
+            tuple(int(property_id) for property_id in prop_ids), limit=int(limit_rows)
+        )
+        decisions = _cached_decision_log(current_account_id(), limit=5000)
         for row in rows:
             property_id = int(row.get("property_id") or 0)
             row["property_name"] = prop_map.get(property_id, "—")
@@ -7259,7 +7382,7 @@ def main():
     active_prop_name = ""
     if active_prop_id:
         try:
-            p = get_property_by_id(active_prop_id, account_id=account_id)
+            p = _cached_property_for_dashboard(active_prop_id, account_id)
             if p:
                 active_prop_name = p.get("name", "")
             else:
@@ -7283,8 +7406,8 @@ def main():
 
     # ── KPI mini-bar in header (solo se ci sono dati) ─────────────────────────
     try:
-        stats = get_summary_stats(account_id=account_id)
-        props_count = len(list_properties(account_id=account_id))
+        stats = _cached_summary_stats_for_account(account_id)
+        props_count = len(_cached_properties_for_account(account_id))
         if stats["total_decisions"] > 0 or props_count > 0:
             _avg_p  = stats.get("avg_price", 0) or 0
             _chg    = stats.get("avg_change_pct", 0) or 0

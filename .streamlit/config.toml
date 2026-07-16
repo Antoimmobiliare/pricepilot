@@ -1,6 +1,9 @@
 [server]
 headless = true
 
+[runner]
+fastReruns = true
+
 [browser]
 gatherUsageStats = false
 

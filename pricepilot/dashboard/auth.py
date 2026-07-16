@@ -62,22 +62,22 @@ LEGAL_DOCUMENTS = {
         "sections": [
             (
                 "1. Oggetto del servizio",
-                "PricePilot e una piattaforma SaaS per supportare host e property manager nella gestione "
-                "dei prezzi degli affitti brevi. Il servizio puo generare suggerimenti, notifiche, "
+                "PricePilot è una piattaforma SaaS per supportare host e property manager nella gestione "
+                "dei prezzi degli affitti brevi. Il servizio può generare suggerimenti, notifiche, "
                 "approvazioni Telegram e automazioni di prezzo in base al piano attivo e alle integrazioni collegate.",
             ),
             (
                 "2. Piani e livello di automazione",
                 "Il piano Free fornisce suggerimenti e richiede aggiornamento manuale sulle OTA. Il piano Plus "
                 "aggiunge approvazione Telegram e applicazione automatica dopo conferma quando il channel manager "
-                "e collegato. Il piano Pro abilita autopilot completo con guardrail e report, sempre nei limiti "
+                "è collegato. Il piano Pro abilita l'autopilot completo con guardrail e report, sempre nei limiti "
                 "delle integrazioni disponibili.",
             ),
             (
-                "3. Responsabilita dell'utente",
-                "L'utente e responsabile dei dati inseriti, delle credenziali, delle proprieta configurate, dei "
+                "3. Responsabilità dell'utente",
+                "L'utente è responsabile dei dati inseriti, delle credenziali, delle proprietà configurate, dei "
                 "limiti prezzo e delle decisioni operative. I prezzi pubblicati sulle OTA restano sotto la "
-                "responsabilita dell'utente, anche quando una proposta viene approvata o automatizzata.",
+                "responsabilità dell'utente, anche quando una proposta viene approvata o automatizzata.",
             ),
             (
                 "4. Nessuna garanzia di ricavo",
@@ -93,16 +93,16 @@ LEGAL_DOCUMENTS = {
             (
                 "6. Uso corretto",
                 "L'utente si impegna a non usare PricePilot per accessi non autorizzati, manipolazione di dati "
-                "altrui, attivita illegali o violazioni dei termini delle OTA e dei provider collegati.",
+                "altrui, attività illegali o violazioni dei termini delle OTA e dei provider collegati.",
             ),
             (
                 "7. Modifiche e sospensione",
-                "PricePilot puo modificare funzionalita, piani, limiti tecnici o condizioni operative. In caso di "
-                "uso improprio, rischi di sicurezza o mancato pagamento futuro, l'accesso puo essere limitato o sospeso.",
+                "PricePilot può modificare funzionalità, piani, limiti tecnici o condizioni operative. In caso di "
+                "uso improprio, rischi di sicurezza o mancato pagamento futuro, l'accesso può essere limitato o sospeso.",
             ),
             (
                 "8. Validazione legale",
-                "Questo documento e una base operativa per la fase beta e deve essere verificato da un professionista "
+                "Questo documento è una base operativa per la fase beta e deve essere verificato da un professionista "
                 "prima della vendita pubblica definitiva.",
             ),
         ],
@@ -110,17 +110,17 @@ LEGAL_DOCUMENTS = {
     "privacy": {
         "title": "Privacy Policy",
         "version": PRIVACY_VERSION,
-        "subtitle": "Informazioni essenziali su quali dati tratta PricePilot e perche.",
+        "subtitle": "Informazioni essenziali su quali dati tratta PricePilot e perché.",
         "sections": [
             (
                 "1. Dati raccolti",
-                "PricePilot puo trattare email, nome attivita, dati account, proprieta, citta/zona, piattaforme "
+                "PricePilot può trattare email, nome attività, dati account, proprietà, città/zona, piattaforme "
                 "usate, range prezzo, strategie, decisioni prezzo, storico operativo, preferenze notifiche, dati "
                 "Telegram necessari alla consegna dei messaggi e identificativi tecnici di sessione.",
             ),
             (
-                "2. Finalita del trattamento",
-                "I dati servono per creare e proteggere l'account, mostrare la dashboard, gestire proprieta e piani, "
+                "2. Finalità del trattamento",
+                "I dati servono per creare e proteggere l'account, mostrare la dashboard, gestire proprietà e piani, "
                 "generare raccomandazioni prezzo, inviare notifiche Telegram, registrare approvazioni, mantenere log "
                 "operativi e migliorare affidabilita del servizio.",
             ),
@@ -131,14 +131,14 @@ LEGAL_DOCUMENTS = {
             ),
             (
                 "4. Provider e trasferimenti",
-                "PricePilot puo usare Supabase per autenticazione e database, Telegram per notifiche, provider di "
+                "PricePilot può usare Supabase per autenticazione e database, Telegram per notifiche, provider di "
                 "pagamento e future integrazioni OTA/PMS/channel manager. Ogni provider riceve solo i dati necessari "
                 "alla funzione collegata.",
             ),
             (
                 "5. Conservazione",
                 "I dati sono conservati per il tempo necessario a fornire il servizio, rispettare obblighi tecnici o "
-                "legali, gestire sicurezza, audit e storico operativo. I dati non piu necessari potranno essere "
+                "legali, gestire sicurezza, audit e storico operativo. I dati non più necessari potranno essere "
                 "cancellati o anonimizzati.",
             ),
             (
@@ -148,12 +148,12 @@ LEGAL_DOCUMENTS = {
             ),
             (
                 "7. Diritti dell'utente",
-                "L'utente puo chiedere accesso, correzione, esportazione, limitazione o cancellazione dei dati secondo "
+                "L'utente può chiedere accesso, correzione, esportazione, limitazione o cancellazione dei dati secondo "
                 "la normativa applicabile. Prima della vendita pubblica va indicato un contatto privacy ufficiale.",
             ),
             (
                 "8. Validazione legale",
-                "Questo documento e una base operativa per la fase beta e deve essere verificato da un professionista "
+                "Questo documento è una base operativa per la fase beta e deve essere verificato da un professionista "
                 "prima della vendita pubblica definitiva.",
             ),
         ],
@@ -165,7 +165,7 @@ LEGAL_DOCUMENTS = {
         "sections": [
             (
                 "1. Cookie tecnici",
-                "PricePilot puo usare cookie o storage tecnico per mantenere la sessione, ricordare lo stato di login "
+                "PricePilot può usare cookie o storage tecnico per mantenere la sessione, ricordare lo stato di login "
                 "e rendere stabile l'esperienza utente. Questi strumenti sono necessari al funzionamento della piattaforma.",
             ),
             (
@@ -180,7 +180,7 @@ LEGAL_DOCUMENTS = {
             ),
             (
                 "4. Scelta dell'utente",
-                "Quando saranno introdotti cookie non necessari, PricePilot dovra mostrare un banner di scelta e salvare "
+                "Quando saranno introdotti cookie non necessari, PricePilot dovrà mostrare un banner di scelta e salvare "
                 "il consenso in modo separato rispetto ai termini di servizio.",
             ),
         ],
@@ -497,7 +497,7 @@ def _handle_supabase_auth_redirect(client) -> bool:
 
     if client is None:
         st.session_state[_KEY_PUBLIC_VIEW] = "login"
-        st.session_state[_KEY_AUTH_NOTICE] = "Link ricevuto, ma Supabase non e configurato in questa istanza."
+        st.session_state[_KEY_AUTH_NOTICE] = "Link ricevuto, ma Supabase non è configurato in questa istanza."
         _clear_auth_query_params()
         st.rerun()
 
@@ -545,9 +545,9 @@ def _handle_supabase_auth_redirect(client) -> bool:
 def _friendly_auth_redirect_error(message: str) -> str:
     msg = (message or "").lower()
     if "otp_expired" in msg or "expired" in msg:
-        return "Il link e scaduto. Richiedi una nuova email e aprila dal dispositivo dove usi PricePilot."
+        return "Il link è scaduto. Richiedi una nuova email e aprila dal dispositivo dove usi PricePilot."
     if "access_denied" in msg:
-        return "Link non valido o gia usato. Richiedi una nuova email."
+        return "Link non valido o già usato. Richiedi una nuova email."
     return f"Non siamo riusciti a completare l'autenticazione: {message}"
 
 
@@ -941,7 +941,7 @@ def _render_public_nav():
     with links_col:
         st.markdown(
             '<div class="pp-nav-links">'
-            '<a href="#funzionalita">Funzionalita</a>'
+            '<a href="#funzionalita">Funzionalità</a>'
             '<a href="#come-funziona">Come funziona</a>'
             '<a href="#prezzi">Prezzi</a>'
             '<a href="#faq">FAQ</a>'
@@ -965,7 +965,7 @@ def _render_landing_page():
             '<section class="pp-enterprise-hero">'
             '<span class="pp-eyebrow">Revenue management per affitti brevi</span>'
             '<h1>Pricing dinamico che lavora come un revenue manager.</h1>'
-            '<p>PricePilot monitora competitor, occupazione, stagionalita ed eventi per trasformare '
+            '<p>PricePilot monitora competitor, occupazione, stagionalità ed eventi per trasformare '
             'ogni variazione di mercato in una decisione prezzo chiara, approvabile o automatica.</p>'
             '</section>',
             unsafe_allow_html=True,
@@ -984,7 +984,7 @@ def _render_landing_page():
         st.markdown(
             '<div class="pp-metric-strip">'
             '<div><b>14</b><span>competitor confrontati</span></div>'
-            '<div><b>+19%</b><span>opportunita su date ad alta domanda</span></div>'
+            '<div><b>+19%</b><span>opportunità su date ad alta domanda</span></div>'
             '<div><b>1 click</b><span>approvazione cambio prezzo</span></div>'
             '</div>',
             unsafe_allow_html=True,
@@ -1149,9 +1149,9 @@ def _render_social_proof_section():
       </div>
       <div class="pp-proof-metrics">
         <div><b>6h</b><span>ciclo analisi mercato configurabile</span></div>
-        <div><b>+19%</b><span>opportunita media su date ad alta domanda</span></div>
+        <div><b>+19%</b><span>opportunità media su date ad alta domanda</span></div>
         <div><b>1 click</b><span>approval Telegram per il piano Plus</span></div>
-        <div><b>25</b><span>proprieta gestibili nel piano Pro</span></div>
+        <div><b>25</b><span>proprietà gestibili nel piano Pro</span></div>
       </div>
     </section>
     """, unsafe_allow_html=True)
@@ -1163,14 +1163,14 @@ def _render_problem_solution_section():
         '<h2>Cambiare i prezzi a mano ti fa perdere ricavi</h2>'
         '<p>Mercato, eventi, weekend e competitor cambiano continuamente. '
         'PricePilot monitora questi segnali e ti aiuta a prendere decisioni di prezzo '
-        'piu veloci e motivate.</p>'
+        'più veloci e motivate.</p>'
         '<div class="pp-dark-grid">'
         '<div class="pp-card"><div class="pp-icon">!</div><h3>Prima</h3>'
         '<p>Prezzi aggiornati manualmente, spesso troppo tardi.</p></div>'
         '<div class="pp-card"><div class="pp-icon">→</div><h3>Con PricePilot</h3>'
         '<p>Suggerimenti automatici basati su mercato e occupazione.</p></div>'
         '<div class="pp-card"><div class="pp-icon">✓</div><h3>Risultato</h3>'
-        '<p>Piu controllo, meno tempo perso, piu opportunita di revenue.</p></div>'
+        '<p>Più controllo, meno tempo perso, più opportunità di revenue.</p></div>'
         '</div>'
         '</section>',
         unsafe_allow_html=True,
@@ -1210,9 +1210,9 @@ def _render_features_section():
     </section>
     <section class="pp-feature-row reverse">
       <div class="pp-feature-copy">
-        <div class="pp-feature-kicker">Occupancy & stagionalita</div>
+        <div class="pp-feature-kicker">Occupancy & stagionalità</div>
         <h2>Prezzi sensibili alla domanda reale.</h2>
-        <p>Weekend, eventi, stagionalita e occupazione cambiano il valore di una notte. PricePilot li traduce in range prezzo controllati.</p>
+        <p>Weekend, eventi, stagionalità e occupazione cambiano il valore di una notte. PricePilot li traduce in range prezzo controllati.</p>
         <div class="pp-feature-points">
           <span>Ricalcolo periodico ogni 6 ore</span>
           <span>Range minimo e massimo sempre rispettati</span>
@@ -1235,7 +1235,7 @@ def _render_features_section():
       <div class="pp-feature-copy">
         <div class="pp-feature-kicker">Telegram approval</div>
         <h2>Automazione con controllo umano.</h2>
-        <p>Nel piano Plus ricevi una proposta prezzo motivata. Approvi o rifiuti da Telegram, poi PricePilot applica il cambio sulle OTA quando l'integrazione e collegata.</p>
+        <p>Nel piano Plus ricevi una proposta prezzo motivata. Approvi o rifiuti da Telegram, poi PricePilot applica il cambio sulle OTA quando l'integrazione è collegata.</p>
         <div class="pp-feature-points">
           <span>Prezzo attuale, prezzo suggerito e motivo</span>
           <span>Approva o rifiuta con un click</span>
@@ -1254,17 +1254,17 @@ def _render_features_section():
       <div class="pp-feature-copy">
         <div class="pp-feature-kicker">Autopilot & analytics</div>
         <h2>Dal consiglio alla gestione automatica.</h2>
-        <p>Il piano Pro applica i cambi prezzo rispettando guardrail e invia un riepilogo decisionale. Tu vedi cosa e successo, perche e con quale impatto stimato.</p>
+        <p>Il piano Pro applica i cambi prezzo rispettando guardrail e invia un riepilogo decisionale. Tu vedi cosa è successo, perché e con quale impatto stimato.</p>
         <div class="pp-feature-points">
           <span>Autopilot con limiti di sicurezza</span>
           <span>Revenue forecast e storico decisioni</span>
-          <span>Gestione multi proprieta per portfolio piu grandi</span>
+          <span>Gestione multi proprietà per portfolio più grandi</span>
         </div>
       </div>
       <div class="pp-mini-shot">
         <div class="pp-shot-label">Portfolio overview</div>
         <div class="pp-mini-shot-grid">
-          <div class="pp-mini-card"><small>Proprieta</small><b>8</b></div>
+          <div class="pp-mini-card"><small>Proprietà</small><b>8</b></div>
           <div class="pp-mini-card"><small>Decisioni oggi</small><b>23</b></div>
           <div class="pp-mini-card"><small>Applicate</small><b style="color:#B5523A">19</b></div>
           <div class="pp-mini-card"><small>In attesa</small><b>4</b></div>
@@ -1275,7 +1275,7 @@ def _render_features_section():
     return
     st.markdown('<span id="funzionalita"></span>', unsafe_allow_html=True)
     st.markdown(
-        '<section class="pp-section"><h2>Funzionalita orientate al ricavo</h2>'
+        '<section class="pp-section"><h2>Funzionalità orientate al ricavo</h2>'
         '<p class="pp-section-lead">Non solo controlli tecnici: ogni funzione serve a decidere '
         'prima, vendere meglio e ridurre il lavoro manuale sulla gestione prezzi.</p></section>',
         unsafe_allow_html=True,
@@ -1286,7 +1286,7 @@ def _render_features_section():
         ("📲", "Telegram approval", "Nel piano Plus approvi ogni cambio prezzo da Telegram prima che venga applicato."),
         ("🤖", "Autopilot completo", "Nel piano Pro PricePilot aggiorna i prezzi automaticamente e ti invia il riepilogo."),
         ("📅", "Calendario smart", "Visualizzi prezzi consigliati, weekend, eventi, override e giorni bloccati."),
-        ("🏢", "Multi proprieta", "Gestisci piu appartamenti con strategie e regole diverse."),
+        ("🏢", "Multi proprietà", "Gestisci più appartamenti con strategie e regole diverse."),
     ]
     for row in range(0, len(features), 3):
         cols = st.columns(3)
@@ -1308,17 +1308,17 @@ def _render_how_it_works_section():
     st.markdown("""
     <section class="pp-section">
       <h2>Tre passaggi, nessun caos operativo.</h2>
-      <p class="pp-section-lead">La piattaforma resta semplice per chi ha una proprieta e scalabile per chi gestisce un portfolio.</p>
+      <p class="pp-section-lead">La piattaforma resta semplice per chi ha una proprietà e scalabile per chi gestisce un portfolio.</p>
       <div class="pp-timeline">
         <div class="pp-time-step">
           <strong>1</strong>
           <h3>Collega OTA</h3>
-          <p>Inserisci proprieta, citta, range prezzo e canali. PricePilot conosce subito i limiti commerciali.</p>
+          <p>Inserisci proprietà, città, range prezzo e canali. PricePilot conosce subito i limiti commerciali.</p>
         </div>
         <div class="pp-time-step">
           <strong>2</strong>
           <h3>Analizza il mercato</h3>
-          <p>Competitor, occupancy, eventi e stagionalita vengono trasformati in una raccomandazione leggibile.</p>
+          <p>Competitor, occupancy, eventi e stagionalità vengono trasformati in una raccomandazione leggibile.</p>
         </div>
         <div class="pp-time-step">
           <strong>3</strong>
@@ -1337,9 +1337,9 @@ def _render_how_it_works_section():
         unsafe_allow_html=True,
     )
     steps = [
-        ("1", "Collega la proprieta", "Inserisci OTA, citta, prezzo minimo e massimo.",
+        ("1", "Collega la proprietà", "Inserisci OTA, città, prezzo minimo e massimo.",
          [("OTA", "Airbnb / Booking"), ("Zona", "Centro storico"), ("Range", "&euro;80 - &euro;220")]),
-        ("2", "PricePilot analizza il mercato", "Competitor, occupancy, eventi, weekend e stagionalita.",
+        ("2", "PricePilot analizza il mercato", "Competitor, occupancy, eventi, weekend e stagionalità.",
          [("Competitor", "14 simili"), ("Domanda", "Alta"), ("Evento", "Fiera weekend")]),
         ("3", "Approvi o automatizzi", "Free: cambi manualmente. Plus: approvi da Telegram. Pro: autopilot completo.",
          [("Free", "Suggerisce"), ("Plus", "Approvi"), ("Pro", "Applica")]),
@@ -1375,7 +1375,7 @@ def _render_pricing_section():
         "EUR 0",
         "Manual pricing assistant",
         "Suggerimenti prezzo e dashboard per aggiornare manualmente le OTA.",
-        ["1 proprieta", "Analisi competitor", "Suggerimenti prezzo", "Calendario smart", "Aggiornamenti ogni 6h"],
+        ["1 proprietà", "Analisi competitor", "Suggerimenti prezzo", "Calendario smart", "Aggiornamenti ogni 6h"],
         "Inizia Gratis",
         mode="Suggerisce",
         missing=["Telegram approval", "Aggiornamento automatico OTA"],
@@ -1387,7 +1387,7 @@ def _render_pricing_section():
         plus_price,
         "Telegram approval",
         "Approvi il cambio da Telegram e PricePilot applica sulle OTA dopo conferma.",
-        ["Fino a 5 proprieta", "Tutto del Free", "Approval Telegram", "Aggiornamento OTA dopo conferma", "Guardrail di sicurezza"],
+        ["Fino a 5 proprietà", "Tutto del Free", "Approval Telegram", "Aggiornamento OTA dopo conferma", "Guardrail di sicurezza"],
         "Scegli Plus",
         recommended=True,
         mode="Approvi e applica",
@@ -1399,7 +1399,7 @@ def _render_pricing_section():
         pro_price,
         "Full autopilot",
         "PricePilot aggiorna automaticamente i prezzi e invia report decisionali.",
-        ["Fino a 25 proprieta", "Tutto del Plus", "Autopilot completo", "Report Telegram", "Supporto prioritario"],
+        ["Fino a 25 proprietà", "Tutto del Plus", "Autopilot completo", "Report Telegram", "Supporto prioritario"],
         "Scegli Pro",
         mode="Fa tutto",
     )
@@ -1417,7 +1417,7 @@ def _render_pricing_section():
     cols = st.columns(3)
     _pricing_card(cols[0], "free", "EUR 0", "Manual pricing assistant",
     "PricePilot analizza il mercato e ti suggerisce il prezzo. Tu lo aggiorni manualmente sulle OTA.", [
-        "1 proprieta",
+        "1 proprietà",
         "Analisi competitor",
         "Suggerimenti prezzo motivati",
         "Calendario smart",
@@ -1427,7 +1427,7 @@ def _render_pricing_section():
     plus_price = "EUR 23/mese" if annual else "EUR 29/mese"
     _pricing_card(cols[1], "plus", plus_price, "Telegram approval automation",
     "PricePilot genera il prezzo, ti chiede conferma su Telegram e dopo approvazione aggiorna automaticamente le OTA.", [
-        "Fino a 5 proprieta",
+        "Fino a 5 proprietà",
         "Tutto del Free",
         "Approvazione Telegram",
         "Aggiornamento OTA dopo approvazione",
@@ -1437,7 +1437,7 @@ def _render_pricing_section():
     pro_price = "EUR 63/mese" if annual else "EUR 79/mese"
     _pricing_card(cols[2], "pro", pro_price, "Full autopilot revenue management",
     "PricePilot aggiorna automaticamente i prezzi sulle OTA e ti invia un report decisionale.", [
-        "Fino a 25 proprieta",
+        "Fino a 25 proprietà",
         "Tutto del Plus",
         "Autopilot completo",
         "Report Telegram automatici",
@@ -1485,16 +1485,16 @@ def _render_faq_section():
         '<div class="pp-faq-wrap">',
         unsafe_allow_html=True,
     )
-    with st.expander("PricePilot cambia gia i prezzi sulle OTA?"):
+    with st.expander("PricePilot cambia già i prezzi sulle OTA?"):
         st.write("Free no: ricevi suggerimenti e aggiorni manualmente. Plus applica dopo approvazione Telegram. Pro applica automaticamente quando le integrazioni OTA/channel manager sono collegate.")
     with st.expander("Come funziona Telegram approval?"):
         st.write("Ricevi prezzo attuale, prezzo suggerito e motivazione. Approvi o rifiuti con un click, senza aprire la dashboard.")
     with st.expander("Airbnb, Booking e channel manager sono supportati?"):
-        st.write("PricePilot e progettato per lavorare con OTA e channel manager tramite API/PMS. La landing mostra il flusso previsto; le integrazioni reali si collegano tramite provider.")
-    with st.expander("Posso usarlo con una sola proprieta?"):
-        st.write("Si. Il piano Free e pensato per partire con una proprieta e capire subito come PricePilot ragiona sui prezzi.")
+        st.write("PricePilot è progettato per lavorare con OTA e channel manager tramite API/PMS. La landing mostra il flusso previsto; le integrazioni reali si collegano tramite provider.")
+    with st.expander("Posso usarlo con una sola proprietà?"):
+        st.write("Sì. Il piano Free è pensato per partire con una proprietà e capire subito come PricePilot ragiona sui prezzi.")
     with st.expander("Ogni quanto analizza il mercato?"):
-        st.write("Il ciclo operativo puo analizzare mercato e proprieta ogni 6 ore, in base al piano e alle impostazioni.")
+        st.write("Il ciclo operativo può analizzare mercato e proprietà ogni 6 ore, in base al piano e alle impostazioni.")
     st.markdown("</div>", unsafe_allow_html=True)
     return
     st.markdown('<span id="faq"></span>', unsafe_allow_html=True)
@@ -1503,16 +1503,16 @@ def _render_faq_section():
         '<p class="pp-section-lead">Le risposte che un host o property manager deve avere prima di automatizzare i prezzi.</p></section>',
         unsafe_allow_html=True,
     )
-    with st.expander("PricePilot cambia gia i prezzi sulle OTA?"):
+    with st.expander("PricePilot cambia già i prezzi sulle OTA?"):
         st.write("Nel piano Free no: ricevi suggerimenti e aggiorni manualmente. Nel piano Plus PricePilot aggiorna dopo approvazione Telegram. Nel piano Pro aggiorna automaticamente.")
     with st.expander("Come funziona Telegram?"):
         st.write("Ricevi una proposta prezzo con motivazione. Puoi approvare o rifiutare con un click.")
     with st.expander("Airbnb e supportato?"):
         st.write("PricePilot e progettato per lavorare con OTA e channel manager. Le integrazioni reali possono essere collegate tramite API/PMS/channel manager.")
-    with st.expander("Posso usarlo con una sola proprieta?"):
-        st.write("Si, il piano Free e pensato proprio per iniziare con una proprieta.")
+    with st.expander("Posso usarlo con una sola proprietà?"):
+        st.write("Sì, il piano Free è pensato proprio per iniziare con una proprietà.")
     with st.expander("Ogni quanto aggiorna i prezzi?"):
-        st.write("Il sistema puo analizzare il mercato ogni 6 ore, in base al piano e alle impostazioni.")
+        st.write("Il sistema può analizzare il mercato ogni 6 ore, in base al piano e alle impostazioni.")
 
 
 def _render_final_cta_section():
@@ -1531,7 +1531,7 @@ def _render_final_cta_section():
     st.markdown(
         '<section class="pp-final-cta">'
         '<h2>Smetti di inseguire il mercato. Lascia che PricePilot lavori per te.</h2>'
-        '<p>Parti con una proprieta. Passa a Plus o Pro quando vuoi automatizzare.</p>'
+        '<p>Parti con una proprietà. Passa a Plus o Pro quando vuoi automatizzare.</p>'
         '</section>',
         unsafe_allow_html=True,
     )
@@ -1646,7 +1646,7 @@ def _render_auth_panel(client, view: str):
 
             else:
                 signup_email = st.text_input("Email", key="auth_signup_email", placeholder="mario@esempio.it")
-                signup_name = st.text_input("Nome attivita", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
+                signup_name = st.text_input("Nome attività", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
                 selected_plan = st.selectbox(
                     "Piano scelto",
                     list(PLAN_ORDER),
@@ -1698,15 +1698,15 @@ def _render_auth_panel(client, view: str):
                         terms_accepted=terms_ok,
                         marketing_accepted=marketing_ok,
                     )
-                if st.button("Hai gia un account? Accedi", key="register_to_login", use_container_width=True):
+                if st.button("Hai già un account? Accedi", key="register_to_login", use_container_width=True):
                     _go_public("login")
 
             auth_label = "Supabase" if client else "sviluppo locale"
             if client is None and not _local_auth_allowed():
                 st.warning(
-                    "Supabase non e configurato. In produzione il login locale e disattivato.",
+                    "Supabase non è configurato. In produzione il login locale è disattivato.",
                 )
-            st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell onboarding iniziale.")
+            st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell'onboarding iniziale.")
             if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
                 _go_public("landing")
 
@@ -1769,10 +1769,10 @@ def _auth_title(view: str) -> str:
 
 def _auth_copy(view: str) -> str:
     return {
-        "login": "Bentornato. Entra nella dashboard per gestire proprieta, decisioni e prezzi.",
+        "login": "Bentornato. Entra nella dashboard per gestire proprietà, decisioni e prezzi.",
         "forgot": "Inserisci la tua email. Con Supabase collegato riceverai il link di recupero.",
-        "reset_password": "Il link di recupero e stato verificato. Imposta una password nuova e sicura.",
-        "register": "Scegli il piano, crea l account e completa il setup della prima proprieta.",
+        "reset_password": "Il link di recupero è stato verificato. Imposta una password nuova e sicura.",
+        "register": "Scegli il piano, crea l'account e completa il setup della prima proprietà.",
     }.get(view, "")
 
 
@@ -1842,7 +1842,7 @@ def _do_signup(
                 "redirect_to": _auth_redirect_url(),
                 "email_redirect_to": _auth_redirect_url(),
                 "data": {
-                    "account_name": account_name or "La mia attivita",
+                    "account_name": account_name or "La mia attività",
                     "plan": account_plan,
                     "requested_plan": selected_plan,
                     "billing_required": selected_plan != account_plan,
@@ -2022,7 +2022,7 @@ def _do_local_signup(
         result = create_account_owner(
             email=email,
             password_hash=_hash_password(password),
-            account_name=account_name or "La mia attivita",
+            account_name=account_name or "La mia attività",
             plan=account_plan,
         )
         _record_signup_consent(
@@ -2069,7 +2069,7 @@ def _ensure_external_user(
         return get_user_by_email(email)
 
     account = create_account(
-        account_name or "La mia attivita",
+        account_name or "La mia attività",
         plan=_account_plan_for_signup(plan),
         billing_status="dev",
     )
@@ -2143,7 +2143,7 @@ def _handle_auth_error(exc: Exception, context: str = ""):
     elif "email not confirmed" in msg:
         st.warning("Conferma la tua email prima di accedere.")
     elif "already registered" in msg:
-        st.error("Esiste gia un account con questa email. Usa Accedi.")
+        st.error("Esiste già un account con questa email. Usa Accedi.")
     elif "rate limit" in msg or "security purposes" in msg or "request this after" in msg:
         st.error("Troppi tentativi ravvicinati. Aspetta circa un minuto e riprova.")
     else:
