@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import hmac
 from typing import Dict, Optional
 
 API_KEY_HEADER = "X-PricePilot-API-Key"
+SCHEDULER_KEY_HEADER = "X-PricePilot-Scheduler-Key"
 
 
 def default_account_id() -> int:
@@ -62,3 +64,10 @@ def resolve_account_id_from_api_key(api_key: str | None) -> Optional[int]:
     if not keys:
         return None if production_mode() else default_account_id()
     return keys.get(api_key or "")
+
+
+def verify_scheduler_key(scheduler_key: str | None) -> bool:
+    """Verifica il segreto del job cloud senza associarlo a un tenant utente."""
+    expected = os.getenv("PRICEPILOT_SCHEDULER_KEY", "").strip()
+    provided = (scheduler_key or "").strip()
+    return bool(expected and provided and hmac.compare_digest(expected, provided))

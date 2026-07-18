@@ -1,0 +1,35 @@
+name: PricePilot cloud scheduler
+
+on:
+  schedule:
+    # Evita l'inizio dell'ora, quando GitHub può ritardare i job pianificati.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pricepilot-cloud-scheduler
+  cancel-in-progress: false
+
+jobs:
+  pricing-cycle:
+    name: Run pricing cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger the PricePilot API
+        env:
+          PRICEPILOT_API_BASE_URL: ${{ secrets.PRICEPILOT_API_BASE_URL }}
+          PRICEPILOT_SCHEDULER_KEY: ${{ secrets.PRICEPILOT_SCHEDULER_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${PRICEPILOT_API_BASE_URL:?Missing repository secret PRICEPILOT_API_BASE_URL}"
+          : "${PRICEPILOT_SCHEDULER_KEY:?Missing repository secret PRICEPILOT_SCHEDULER_KEY}"
+
+          curl --fail-with-body --show-error --silent \
+            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 240 \
+            -X POST "${PRICEPILOT_API_BASE_URL%/}/internal/scheduled-pricing-cycle" \
+            -H "X-PricePilot-Scheduler-Key: ${PRICEPILOT_SCHEDULER_KEY}" \
+            -H "Accept: application/json"

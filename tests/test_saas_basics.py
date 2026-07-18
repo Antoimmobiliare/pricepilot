@@ -21,6 +21,7 @@ from pricepilot.core.database import (
 from pricepilot.core.plans import effective_sync_mode, get_plan_limit
 import pricepilot.engine.decision_engine as decision_engine
 from pricepilot.engine.decision_engine import approve_decision, process_decision
+from pricepilot.core.scheduler import run_cloud_pricing_cycle
 from pricepilot.providers.contracts import ChannelUpdateResult, MarketDataResult
 from pricepilot.providers.registry import (
     reset_providers,
@@ -177,6 +178,21 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         self.assertEqual(result["account"]["plan"], "plus")
         self.assertEqual(result["user"]["account_id"], result["account"]["id"])
+
+    def test_cloud_scheduler_runs_once_for_each_account_with_properties(self):
+        account_a = self._account("free", "Cloud Host A")
+        account_b = self._account("plus", "Cloud Host B")
+        self._account("free", "No Property Host")
+        self._property(account_a, "Cloud Apt A")
+        self._property(account_b, "Cloud Apt B")
+
+        with patch("pricepilot.core.scheduler.run_pricing_cycle", return_value={"run": {}, "results": [], "errors": []}) as run_cycle:
+            result = run_cloud_pricing_cycle(source="unit_test_cloud")
+
+        processed = {call.kwargs["account_id"] for call in run_cycle.call_args_list}
+        self.assertEqual(processed, {account_a["id"], account_b["id"]})
+        self.assertEqual(result["accounts_processed"], 2)
+        self.assertEqual(result["accounts_failed"], 0)
 
     def test_account_isolation_for_properties_decisions_and_approval(self):
         account_a = self._account("free", "Host A")

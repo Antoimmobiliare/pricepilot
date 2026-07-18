@@ -40,7 +40,7 @@ from pricepilot.services.property_service import (
     update_property, remove_property,
 )
 from pricepilot.engine.decision_engine import process_decision, approve_decision
-from pricepilot.core.scheduler import run_pricing_cycle
+from pricepilot.core.scheduler import run_cloud_pricing_cycle, run_pricing_cycle
 from pricepilot.providers.registry import (
     get_billing_provider,
     get_event_provider,
@@ -59,11 +59,13 @@ from pricepilot.services.account_service import (
 )
 from pricepilot.services.tenant_service import (
     API_KEY_HEADER,
+    SCHEDULER_KEY_HEADER,
     api_auth_required,
     configured_api_keys,
     default_account_id,
     production_mode,
     resolve_account_id_from_api_key,
+    verify_scheduler_key,
 )
 
 
@@ -98,6 +100,7 @@ PUBLIC_PATHS = {
     "/openapi.json",
     "/telegram/webhook",
     "/stripe/webhook",
+    "/internal/scheduled-pricing-cycle",
 }
 
 
@@ -565,6 +568,18 @@ def api_run_pricing_cycle(request: Request):
     if not get_billing_provider().can_run_manual_cycle(account=account, user=None):
         raise HTTPException(403, "Il ciclo manuale e disponibile solo in test/admin.")
     return run_pricing_cycle(account_id=account_id, source="api_manual")
+
+
+@app.post(
+    "/internal/scheduled-pricing-cycle",
+    tags=["Operations"],
+    include_in_schema=False,
+)
+def api_run_scheduled_pricing_cycle(request: Request):
+    """Trigger interno per il job cloud, separato dalle API dei singoli utenti."""
+    if not verify_scheduler_key(request.headers.get(SCHEDULER_KEY_HEADER)):
+        raise HTTPException(401, "Chiave scheduler mancante o non valida.")
+    return run_cloud_pricing_cycle(source="github_actions")
 
 
 @app.get("/operations/runs", tags=["Operations"], summary="Storico cicli operativi")

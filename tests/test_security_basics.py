@@ -22,8 +22,10 @@ from pricepilot.core.database import (
 )
 from pricepilot.services.property_service import create_property
 from pricepilot.services.tenant_service import (
+    SCHEDULER_KEY_HEADER,
     api_auth_required,
     resolve_account_id_from_api_key,
+    verify_scheduler_key,
 )
 from pricepilot.services.telegram_bot import (
     WEBHOOK_SECRET_HEADER,
@@ -101,6 +103,28 @@ class SecurityBasicsTestCase(unittest.TestCase):
             self.assertEqual(resolve_account_id_from_api_key("key-a"), 2)
             self.assertEqual(resolve_account_id_from_api_key("key-b"), 7)
             self.assertIsNone(resolve_account_id_from_api_key("bad-key"))
+
+    def test_scheduler_key_is_separate_from_tenant_api_keys(self):
+        with patch.dict(os.environ, {"PRICEPILOT_SCHEDULER_KEY": "scheduler-secret"}, clear=True):
+            self.assertTrue(verify_scheduler_key("scheduler-secret"))
+            self.assertFalse(verify_scheduler_key("wrong-secret"))
+            self.assertFalse(verify_scheduler_key(None))
+
+    def test_cloud_scheduler_endpoint_requires_its_own_secret(self):
+        from pricepilot.api import server
+
+        request = FakeRequest(
+            "/internal/scheduled-pricing-cycle",
+            headers={SCHEDULER_KEY_HEADER: "scheduler-secret"},
+        )
+        with patch.dict(os.environ, {"PRICEPILOT_SCHEDULER_KEY": "scheduler-secret"}, clear=True):
+            with patch.object(server, "run_cloud_pricing_cycle", return_value={"ok": True}) as run_cycle:
+                self.assertEqual(server.api_run_scheduled_pricing_cycle(request), {"ok": True})
+                run_cycle.assert_called_once_with(source="github_actions")
+
+            with self.assertRaises(server.HTTPException) as context:
+                server.api_run_scheduled_pricing_cycle(FakeRequest("/internal/scheduled-pricing-cycle"))
+        self.assertEqual(context.exception.status_code, 401)
 
     def test_telegram_webhook_secret_rules(self):
         with patch.dict(os.environ, {}, clear=True):
