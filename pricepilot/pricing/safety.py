@@ -15,6 +15,8 @@ Funzione standalone (pre-validazione):
   competitor_sanity_check() -> se competitor_avg e fuori range +/-60%
 """
 import logging
+import math
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Tuple
 
 logger = logging.getLogger("pricepilot.safety")
@@ -155,6 +157,7 @@ def apply_all_safety(
     has_event: bool = False,
     occupancy: float = 0.0,
     occ_high_threshold: float = 0.80,
+    lead_time_limits: bool = True,
 ) -> Tuple[float, str]:
     """
     Applica tutti i guardrail in sequenza (backward-compatible, parametri extra opzionali).
@@ -162,31 +165,27 @@ def apply_all_safety(
     Ordine: max_change -> last_minute -> early_booking -> break_even
             -> dynamic_floor -> floor_statico -> ceiling
     """
-    notes = []
-
-    price, note = enforce_max_change(old_price, new_price, max_change_pct)
-    if note != "ok":
-        notes.append(note)
-
-    price, note = enforce_last_minute(old_price, price, days_until)
-    if note != "ok":
-        notes.append(note)
-
-    price, note = enforce_early_booking(old_price, price, days_until)
-    if note != "ok":
-        notes.append(note)
-
-    price, note = enforce_break_even(price, break_even)
-    if note != "ok":
-        notes.append(note)
-
-    dyn_floor = compute_dynamic_floor(min_price, is_weekend, has_event, occupancy, occ_high_threshold)
-    effective_floor = max(min_price, dyn_floor)
-    if price < effective_floor:
-        price = effective_floor
-        notes.append(f"dynamic_floor={effective_floor:.2f}")
-
-    price = enforce_floor(price, min_price)
-    price = enforce_ceiling(price, max_price)
-
-    return round(price, 2), (" | ".join(notes) if notes else "ok")
+    values = (old_price, new_price, min_price, max_price, max_change_pct, break_even, occupancy)
+    if not all(math.isfinite(float(v)) for v in values):
+        raise ValueError("Prezzi e limiti devono essere numeri finiti.")
+    if old_price <= 0 or min_price <= 0 or max_price < min_price or break_even < 0:
+        raise ValueError("Configurazione prezzi non valida.")
+    if not 0 <= max_change_pct <= 1 or not 0 <= occupancy <= 1:
+        raise ValueError("Percentuali fuori intervallo.")
+    # Intersect ALL constraints. Applying a floor after max-change used to
+    # violate the cap; applying a ceiling after break-even violated costs.
+    lower = max(min_price, break_even, old_price * (1 - max_change_pct),
+                compute_dynamic_floor(min_price, is_weekend, has_event, occupancy, occ_high_threshold))
+    upper = min(max_price, old_price * (1 + max_change_pct))
+    if lead_time_limits and days_until < 3:
+        lower = max(lower, old_price * 0.90)
+    if lead_time_limits and days_until > 60:
+        lower = max(lower, old_price * 0.95)
+    cent = Decimal("0.01")
+    lo = Decimal(str(lower)).quantize(cent, rounding=ROUND_CEILING)
+    hi = Decimal(str(upper)).quantize(cent, rounding=ROUND_FLOOR)
+    if lo > hi:
+        raise ValueError("Limiti prezzo incompatibili: correggere floor, costi, ceiling o variazione massima.")
+    proposed = Decimal(str(new_price)).quantize(cent)
+    final = max(lo, min(hi, proposed))
+    return float(final), "ok" if final == proposed else f"bounded [{lo}, {hi}]"

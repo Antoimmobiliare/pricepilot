@@ -17,6 +17,8 @@ from typing import Any
 
 logger = logging.getLogger("pricepilot.supabase")
 
+_STREAMLIT_CLIENT_KEY = "_pp_supabase_client"
+
 
 def _setting(name: str) -> str:
     """Legge una configurazione senza esporre mai il valore nei log.
@@ -57,11 +59,10 @@ def get_supabase_client(*, use_auth_session: bool = True) -> Any | None:
     """
     Ritorna un client Supabase, oppure None se non configurato/disponibile.
 
-    Il client non viene tenuto in cache: in Streamlit piu utenti condividono lo
-    stesso processo Python e un client globale potrebbe conservare la sessione
-    sbagliata. Quando disponibile, agganciamo al client il token Supabase della
-    sessione Streamlit corrente, cosi le policy RLS basate su auth.uid() possono
-    funzionare correttamente.
+    In Streamlit il client viene riutilizzato esclusivamente nella sessione del
+    browser corrente. Questo evita di ricreare client HTTP a ogni click senza
+    condividere credenziali tra utenti. Fuori da Streamlit viene creato un client
+    nuovo, come prima.
     """
     url, key = get_supabase_settings()
     if not url or not key:
@@ -73,11 +74,14 @@ def get_supabase_client(*, use_auth_session: bool = True) -> Any | None:
         logger.warning("Supabase configurato ma il pacchetto non e disponibile: %s", exc)
         return None
 
-    try:
-        client = create_client(url, key)
-    except Exception as exc:
-        logger.warning("Impossibile creare il client Supabase: %s", exc)
-        return None
+    client = _streamlit_cached_client()
+    if client is None:
+        try:
+            client = create_client(url, key)
+        except Exception as exc:
+            logger.warning("Impossibile creare il client Supabase: %s", exc)
+            return None
+        _store_streamlit_client(client)
 
     if use_auth_session:
         _attach_current_auth_session(client)
@@ -139,8 +143,17 @@ def _attach_current_auth_session(client: Any) -> None:
     if not access_token:
         return
 
+    # set_session puo aggiornare il token via rete. Non ripeterlo a ogni rerun
+    # quando il client della stessa sessione browser ha gia il token corretto.
+    if getattr(client, "_pricepilot_access_token", "") == access_token:
+        return
+
     try:
         client.auth.set_session(access_token, refresh_token or "")
+        try:
+            setattr(client, "_pricepilot_access_token", access_token)
+        except Exception:
+            pass
         return
     except Exception as exc:
         logger.debug("Supabase set_session non riuscito: %s", exc)
@@ -148,8 +161,44 @@ def _attach_current_auth_session(client: Any) -> None:
     # Fallback leggero: PostgREST accetta direttamente il bearer token.
     try:
         client.postgrest.auth(access_token)
+        try:
+            setattr(client, "_pricepilot_access_token", access_token)
+        except Exception:
+            pass
     except Exception as exc:
         logger.debug("Supabase postgrest auth fallback non riuscito: %s", exc)
+
+
+def _streamlit_cached_client() -> Any | None:
+    """Legge il client dalla sessione browser corrente, mai da cache globale."""
+    try:
+        import streamlit as st
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        try:
+            ctx = get_script_run_ctx(suppress_warning=True)
+        except TypeError:
+            ctx = get_script_run_ctx()
+        if ctx is None:
+            return None
+        return st.session_state.get(_STREAMLIT_CLIENT_KEY)
+    except Exception:
+        return None
+
+
+def _store_streamlit_client(client: Any) -> None:
+    try:
+        import streamlit as st
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        try:
+            ctx = get_script_run_ctx(suppress_warning=True)
+        except TypeError:
+            ctx = get_script_run_ctx()
+        if ctx is not None:
+            st.session_state[_STREAMLIT_CLIENT_KEY] = client
+    except Exception:
+        return
 
 
 def _streamlit_auth_tokens() -> tuple[str, str]:

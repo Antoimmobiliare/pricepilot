@@ -415,6 +415,10 @@ class SecurityBasicsTestCase(unittest.TestCase):
             "telegram_username": "owner",
             "active": 1,
         })
+        # The approval must still reference the current observed tariff.
+        upsert_calendar_price({"account_id": account["id"], "property_id": prop["id"],
+            "date": "2026-05-18", "current_price": 100.0, "current_price_source": "manual",
+            "recommended_price": 120.0, "status": "pending_approval", "decision_log_id": log_id})
 
         old_answer = telegram_bot.answer_callback_query
         old_edit = telegram_bot.edit_message_text

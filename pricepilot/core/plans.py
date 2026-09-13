@@ -110,8 +110,9 @@ def effective_sync_mode(plan: str | None, requested_mode: str | None = None) -> 
     key = normalize_plan(plan)
     if key == PLAN_FREE:
         return "advisory"
+    requested = requested_mode or "advisory"
+    if requested not in {"advisory", "approval", "auto"}:
+        raise ValueError("Modalita pricing sconosciuta.")
     if key == PLAN_PLUS:
-        return "approval"
-    if key == PLAN_PRO:
-        return "auto"
-    return requested_mode or "advisory"
+        return "advisory" if requested == "advisory" else "approval"
+    return requested

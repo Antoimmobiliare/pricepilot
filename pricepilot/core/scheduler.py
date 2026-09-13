@@ -7,8 +7,47 @@ import time
 import logging
 from datetime import date, datetime, timedelta
 from typing import Callable, Dict, Optional
+from pricepilot.core.data_quality import calendar_pricing_enabled
+from pricepilot.engine.calendar_pricing import pricing_today
+from types import SimpleNamespace
 
 logger = logging.getLogger("pricepilot.scheduler")
+
+
+def _event_context_for_property(event_provider, prop: dict, target_date: date, account_id: int) -> tuple[str, str]:
+    """Resolve a normalized event type and a human label for one property."""
+    event = None
+    try:
+        property_lookup = getattr(event_provider, "event_for_property", None)
+        if callable(property_lookup):
+            event = property_lookup(
+                prop=prop,
+                target_date=target_date,
+                account_id=account_id,
+            )
+        else:
+            event = event_provider.event_for_date(target_date)
+    except Exception as exc:
+        # A public-events API outage must not prevent the full pricing cycle.
+        logger.warning(
+            "Impossibile leggere eventi per property_id=%s: %s",
+            prop.get("id"),
+            exc,
+        )
+        try:
+            event = event_provider.event_for_date(target_date)
+        except Exception:
+            event = None
+
+    event_type = event_provider.event_to_string(event)
+    label_lookup = getattr(event_provider, "event_label", None)
+    if callable(label_lookup):
+        event_label = str(label_lookup(event) or "").strip()
+    elif event:
+        event_label = str(event.get("name") or event_type).strip()
+    else:
+        event_label = ""
+    return event_type, event_label
 
 
 def run_periodic(func: Callable, hours: float = 6, once: bool = False) -> None:
@@ -40,6 +79,7 @@ def run_pricing_cycle(
     target_date: Optional[date] = None,
     interval_hours: float = 6,
     source: str = "scheduler",
+    horizon_days: Optional[int] = None,
 ) -> Dict:
     """
     Esegue un ciclo SaaS completo su tutte le proprieta dell'account.
@@ -62,7 +102,11 @@ def run_pricing_cycle(
         get_occupancy_provider,
     )
 
-    d = target_date or date.today()
+    start_date = target_date or pricing_today()
+    horizon = horizon_days if horizon_days is not None else (1 if target_date else int(os.getenv("PRICEPILOT_HORIZON_DAYS", "90")))
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or not 1 <= horizon <= 366:
+        raise ValueError("Orizzonte pricing: intero fra 1 e 366 giorni.")
+    d = start_date
     billing_provider = get_billing_provider()
     billing_plan = billing_provider.get_account_plan(account_id=account_id)
     plan = get_plan(billing_plan.plan)
@@ -98,12 +142,12 @@ def run_pricing_cycle(
         }
     if run_id is None:
         raise RuntimeError("Impossibile avviare il ciclo pricing.")
-    properties = [p for p in get_properties() if int(p.get("account_id") or 1) == account_id]
+    properties = get_properties(account_id=account_id)
     results = []
     errors = []
     property_results = []
-    event_provider = get_event_provider()
-    market_provider = get_market_data_provider()
+    event_provider = None if calendar_pricing_enabled() else get_event_provider()
+    market_provider = SimpleNamespace(name="not_used_calendar_only") if calendar_pricing_enabled() else get_market_data_provider()
     occupancy_provider = get_occupancy_provider()
 
     record_audit_event(
@@ -126,52 +170,81 @@ def run_pricing_cycle(
     )
 
     try:
-        event = event_provider.event_to_string(event_provider.event_for_date(d))
         for prop in properties:
-            try:
-                occupancy = occupancy_provider.estimate(
-                    property_id=int(prop["id"]),
-                    target_date=d,
-                    account_id=account_id,
-                )
-                result = process_decision(
-                    property_id=int(prop["id"]),
-                    occupancy=occupancy.occupancy,
-                    target_date=d,
-                    event=event,
-                    competitor_count=int(plan.get("competitor_limit", 10)),
-                    data_source=getattr(market_provider, "name", "market_provider"),
-                    occupancy_source=occupancy.source,
-                )
-                results.append(result)
-                property_results.append({
-                    "property_id": prop.get("id"),
-                    "property_name": prop.get("name", ""),
-                    "status": "ok",
-                    "mode": result.get("mode"),
-                    "decision": result.get("decision"),
-                    "recommended_price": result.get("recommended_price"),
-                    "calendar_status": result.get("calendar_status"),
-                })
-            except Exception as exc:
-                logger.error("Errore ciclo property_id=%s: %s", prop.get("id"), exc, exc_info=True)
-                err = {
-                    "property_id": prop.get("id"),
-                    "property_name": prop.get("name", ""),
-                    "error": str(exc),
-                }
-                errors.append(err)
-                property_results.append({
-                    "property_id": prop.get("id"),
-                    "property_name": prop.get("name", ""),
-                    "status": "error",
-                    "error": str(exc),
-                })
-
+            if os.getenv("PRICEPILOT_CHANNEL_PROVIDER") == "beds24" and os.getenv("PRICEPILOT_OCCUPANCY_PROVIDER") == "observed_inventory":
+                try:
+                    from pricepilot.services.beds24_sync import sync_property
+                    sync_property(account_id, int(prop["id"]), start_date, horizon)
+                except Exception as exc:
+                    errors.append({"property_id": prop["id"], "date": start_date.isoformat(), "error": str(exc), "stage": "inventory_sync"})
+                    continue
+            for offset in range(horizon):
+                d = start_date + timedelta(days=offset)
+                try:
+                    event_type, event_label = ("", "") if calendar_pricing_enabled() else _event_context_for_property(
+                        event_provider,
+                        prop,
+                        d,
+                        account_id,
+                    )
+                    occupancy = occupancy_provider.estimate(
+                        property_id=int(prop["id"]),
+                        target_date=d,
+                        account_id=account_id,
+                    )
+                    if occupancy.raw.get("target_state") in {"booked", "owner_blocked", "maintenance_blocked", "unavailable"}:
+                        property_results.append({"property_id": prop["id"], "date": d.isoformat(), "status": "skipped_unavailable"})
+                        continue
+                    result = process_decision(
+                        property_id=int(prop["id"]),
+                        occupancy=occupancy.occupancy,
+                        target_date=d,
+                        event=event_type,
+                        event_label=event_label,
+                        competitor_count=int(plan.get("competitor_limit", 10)),
+                        data_source=getattr(market_provider, "name", "market_provider"),
+                        occupancy_source=occupancy.source,
+                        defer_notifications=True,
+                        account_id=account_id,
+                    )
+                    results.append(result)
+                    property_results.append({
+                        "date": d.isoformat(),
+                        "property_id": prop.get("id"),
+                        "property_name": prop.get("name", ""),
+                        "status": "ok",
+                        "mode": result.get("mode"),
+                        "decision": result.get("decision"),
+                        "recommended_price": result.get("recommended_price"),
+                        "calendar_status": result.get("calendar_status"),
+                        "event": result.get("event", ""),
+                        "event_type": result.get("event_type", "none"),
+                    })
+                except Exception as exc:
+                    logger.error("Errore ciclo property_id=%s: %s", prop.get("id"), exc, exc_info=True)
+                    err = {
+                        "date": d.isoformat(),
+                        "property_id": prop.get("id"),
+                        "property_name": prop.get("name", ""),
+                        "error": str(exc),
+                    }
+                    errors.append(err)
+                    property_results.append({
+                        "date": d.isoformat(),
+                        "property_id": prop.get("id"),
+                        "property_name": prop.get("name", ""),
+                        "status": "error",
+                        "error": str(exc),
+                    })
+        from pricepilot.services.telegram_bot import send_cycle_digest
+        notifications = send_cycle_digest(account_id, results)
         status = "success" if not errors else ("partial_error" if results else "error")
         summary = {
-            "date": d.isoformat(),
+            "date": start_date.isoformat(),
+            "horizon_days": horizon,
+            "end_exclusive": (start_date + timedelta(days=horizon)).isoformat(),
             "properties": len(properties),
+            "notifications": notifications,
             "decisions": len(results),
             "errors": errors,
             "property_results": property_results,
@@ -227,6 +300,7 @@ def run_cloud_pricing_cycle(
     target_date: Optional[date] = None,
     interval_hours: float = 6,
     source: str = "cloud_scheduler",
+    horizon_days: Optional[int] = None,
 ) -> Dict:
     """Esegue il ciclo su ogni account che possiede almeno una proprietà.
 
@@ -251,10 +325,13 @@ def run_cloud_pricing_cycle(
                 target_date=target_date,
                 interval_hours=interval_hours,
                 source=source,
+                horizon_days=horizon_days,
             )
+            if result.get("errors"):
+                errors.append({"account_id": account_id, "error": "Ciclo incompleto", "details": result["errors"]})
             results.append({
                 "account_id": account_id,
-                "status": "skipped" if result.get("skipped") else "ok",
+                "status": "skipped" if result.get("skipped") else ("error" if result.get("errors") else "ok"),
                 "run": result.get("run"),
                 "decisions": len(result.get("results") or []),
                 "errors": result.get("errors") or [],

@@ -21,11 +21,13 @@ from pricepilot.core.database import (
 from pricepilot.core.plans import effective_sync_mode, get_plan_limit
 import pricepilot.engine.decision_engine as decision_engine
 from pricepilot.engine.decision_engine import approve_decision, process_decision
-from pricepilot.core.scheduler import run_cloud_pricing_cycle
+from pricepilot.core.scheduler import run_cloud_pricing_cycle, run_pricing_cycle
 from pricepilot.providers.contracts import ChannelUpdateResult, MarketDataResult
+from pricepilot.providers.competitors import UnconfiguredCompetitorProvider
 from pricepilot.providers.registry import (
     reset_providers,
     set_channel_manager_provider,
+    set_event_provider,
     set_market_data_provider,
 )
 from pricepilot.services.account_service import create_account_owner
@@ -74,6 +76,30 @@ class StaticMarketDataProvider:
             source=source,
             raw={"test": True},
         )
+
+
+class PropertyEventProvider:
+    name = "test_property_events"
+
+    def __init__(self):
+        self.property_ids = []
+
+    def event_for_property(self, *, prop, target_date, account_id=1):
+        self.property_ids.append(int(prop["id"]))
+        return {
+            "name": f"Evento {prop.get('city')}",
+            "event_type": "festival",
+            "impact_level": "high",
+        }
+
+    def event_for_date(self, target_date):
+        return None
+
+    def event_to_string(self, event):
+        return str((event or {}).get("event_type") or "none")
+
+    def event_label(self, event):
+        return str((event or {}).get("name") or "")
 
 
 class LiveChannelProvider:
@@ -229,7 +255,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self.assertEqual(get_plan_limit("pro", "max_properties"), 25)
         self.assertEqual(effective_sync_mode("free", "auto"), "advisory")
         self.assertEqual(effective_sync_mode("plus", "auto"), "approval")
-        self.assertEqual(effective_sync_mode("pro", "approval"), "auto")
+        self.assertEqual(effective_sync_mode("pro", "approval"), "approval")
 
         free_account = self._account("free", "Free Host")
         self._property(free_account, "Free Apt 1")
@@ -314,6 +340,41 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self.assertEqual(guarded_result["mode"], "approval")
         self.assertFalse(guarded_result["applied"])
         self.assertIn("auto_disabled_by_policy", guarded_result["guardrail_reasons"])
+
+    def test_pro_requires_real_market_data_before_autopilot(self):
+        set_market_data_provider(UnconfiguredCompetitorProvider())
+        account = self._account("pro", "Pro Without Competitors")
+        prop = self._property(account)
+
+        result = process_decision(
+            property_id=prop["id"],
+            occupancy=0.65,
+            target_date=TARGET_DATE,
+            competitor_count=10,
+            data_source="unconfigured",
+            occupancy_source="test",
+        )
+
+        self.assertEqual(result["requested_mode"], "auto")
+        self.assertEqual(result["mode"], "approval")
+        self.assertFalse(result["applied"])
+        self.assertIn("market_data_provider_not_configured", result["guardrail_reasons"])
+
+    def test_scheduler_resolves_events_for_the_specific_property(self):
+        event_provider = PropertyEventProvider()
+        set_event_provider(event_provider)
+        account = self._account("free", "Event Location Host")
+        prop = self._property(account, "Lucca Event Apartment")
+
+        result = run_pricing_cycle(
+            account_id=account["id"],
+            target_date=TARGET_DATE,
+            source="unit_test_event_location",
+        )
+
+        self.assertEqual(event_provider.property_ids, [prop["id"]])
+        self.assertEqual(result["results"][0]["event"], "Evento Lucca")
+        self.assertEqual(result["results"][0]["event_type"], "festival")
 
     def test_locked_calendar_price_is_not_changed_by_pricing_cycle(self):
         account = self._account("plus", "Calendar Host")

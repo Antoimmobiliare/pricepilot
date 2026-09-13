@@ -1,0 +1,10 @@
+{
+  "tests": 174,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "successful": true,
+  "external_network": "blocked",
+  "database": "temporary",
+  "live_integrations_verified": false
+}

@@ -64,11 +64,11 @@ def get_webhook_secret() -> str:
 
 
 def webhook_secret_required() -> bool:
-    env = os.environ.get("PRICEPILOT_ENV", "").strip().lower()
+    from pricepilot.core.data_quality import live_mode
     explicit = os.environ.get("PRICEPILOT_REQUIRE_TELEGRAM_WEBHOOK_SECRET", "").strip().lower()
     return (
         bool(get_webhook_secret())
-        or env in {"prod", "production"}
+        or live_mode()
         or explicit in {"1", "true", "yes", "on"}
     )
 
@@ -197,6 +197,8 @@ def send_approval_request(
     event:      str,
     chat_id:    int,
     reason:     str = "",
+    target_date: str = "",
+    next_log_id: Optional[int] = None,
 ) -> Dict:
     """
     Invia il messaggio di richiesta approvazione con i pulsanti inline
@@ -213,9 +215,11 @@ def send_approval_request(
         f"✈️ *PricePilot – Approvazione Richiesta*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏠 *Proprietà:* {prop_name}\n"
+        f"📅 *Notte:* {target_date or 'vedi motivo'}\n"
         f"💰 *Prezzo attuale:* €{old_price:.2f}\n"
         f"🎯 *Prezzo consigliato:* €{new_price:.2f} {arrow} `{pct:+.1f}%`\n"
-        f"📊 *Media mercato:* €{market_avg:.2f}\n"
+        + (f"📊 *Media mercato:* €{market_avg:.2f}\n" if market_avg is not None else "📋 Analisi calendario proprio; competitor da verificare manualmente.\n")
+        +
         f"📈 *Occupancy:* {occupancy * 100:.0f}%"
         f"{event_line}"
         f"{reason_line}\n"
@@ -229,6 +233,8 @@ def send_approval_request(
             {"text": "❌ Rifiuta",  "callback_data": f"reject_{log_id}"},
         ]]
     }
+    if next_log_id:
+        keyboard['inline_keyboard'].append([{'text': 'Prossima data da valutare', 'callback_data': f'review_{next_log_id}'}])
 
     result = _api_call("sendMessage", {
         "chat_id":      chat_id,
@@ -245,6 +251,93 @@ def send_approval_request(
             update_decision_tg_message(log_id, msg_id)
 
     return result
+
+
+def send_cycle_digest(account_id: int, results: list) -> dict:
+    """One plain-text overview per property; each nightly change is approved separately."""
+    from pricepilot.core.database import (get_property, get_telegram_link_by_property,
+                                          get_notification_preferences, record_notification_log)
+    grouped = {}
+    for row in results:
+        if row.get('deduplicated') or row.get('calendar_status') in {'unchanged', 'locked'}:
+            continue
+        if row.get('mode') not in {'approval', 'advisory'}:
+            continue
+        property_id = row.get('property_id')
+        if not property_id or not get_property(property_id, account_id=account_id):
+            continue
+        grouped.setdefault(property_id, []).append(row)
+    sent, failed = 0, 0
+    if not is_configured():
+        return {'sent': 0, 'failed': 0, 'status': 'not_configured'}
+    for property_id, rows in grouped.items():
+        prefs = get_notification_preferences(account_id, property_id)
+        if not int(prefs.get('telegram_enabled', 1)) or not int(prefs.get('approval_alerts', 1)):
+            continue
+        link = get_telegram_link_by_property(property_id)
+        if not link or not link.get('chat_id'):
+            continue
+        rows.sort(key=lambda r: r['date'])
+        text = f"PricePilot — {rows[0].get('property_name', '')}\n{len(rows)} proposte sul tuo calendario. Nessun prezzo modificato.\n\n"
+        for row in rows[:12]:
+            actions = (row.get('breakdown') or {}).get('manual_actions') or []
+            if actions and row.get('calendar_status') == 'manual_review':
+                action = actions[0]
+                text += (f"{row['date']}: prezzo invariato; valuta soggiorno minimo "
+                         f"{action['current_minimum_stay']} → {action['suggested_minimum_stay']} notti\n")
+            else:
+                text += f"{row['date']}: EUR {row['old_price']:.2f} → {row['recommended_price']:.2f}\n"
+        if len(rows) > 12:
+            text += f"Altre {len(rows)-12} date disponibili nella dashboard.\n"
+        text += '\nApri i dettagli per valutare e approvare una notte alla volta. Le proposte scadono dopo 6 ore; disponibilità e regole vengono ricontrollate.'
+        pending = [r for r in rows if r.get('mode') == 'approval'
+                   and r.get('calendar_status') == 'pending_approval']
+        payload = {'chat_id': link['chat_id'], 'text': text}
+        if pending:
+            payload['reply_markup'] = {'inline_keyboard': [[{'text': 'Esamina le proposte', 'callback_data': f"review_{pending[0]['log_id']}"}]]}
+        response = _api_call('sendMessage', payload)
+        ok = bool(response.get('ok'))
+        sent += int(ok)
+        failed += int(not ok)
+        record_notification_log(event_type='pricing_cycle_digest', status='sent' if ok else 'failed',
+            account_id=account_id, property_id=property_id, recipient=str(link['chat_id']),
+            payload={'decision_ids': [r['log_id'] for r in rows]}, error='' if ok else 'Telegram delivery not confirmed')
+    return {'sent': sent, 'failed': failed}
+
+
+def _review_pending(log_id, chat_id):
+    from pricepilot.core.database import get_decision_log_entry, get_decision_log, get_calendar_price
+    context = _decision_context_for_chat(log_id, chat_id)
+    if not context:
+        return False
+    row = get_decision_log_entry(log_id, context['account_id'])
+    if not row or not str(row.get('decision', '')).startswith('PENDING_APPROVAL') or any(t in row['decision'] for t in ('[REJECTED]', '[APPROVED_', '[APPLYING]')):
+        return False
+    from datetime import datetime, timezone
+    stamp = datetime.fromisoformat(str(row['timestamp']).replace('Z', '+00:00'))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    if not 0 <= (datetime.now(timezone.utc)-stamp).total_seconds() <= 6*3600:
+        return False
+    current = get_calendar_price(context['property_id'], row['date'], context['account_id'])
+    if not current or current.get('decision_log_id') != log_id:
+        return False
+    candidates = get_decision_log(limit=1000, property_id=context['property_id'], account_id=context['account_id'])
+    remaining = []
+    for candidate in candidates:
+        state = candidate.get('decision') or ''
+        if candidate['id'] == log_id or candidate['date'] <= row['date'] or not state.startswith('PENDING_APPROVAL') or '[' in state:
+            continue
+        pointer = get_calendar_price(context['property_id'], candidate['date'], context['account_id'])
+        if pointer and pointer.get('decision_log_id') == candidate['id']:
+            remaining.append(candidate)
+    remaining.sort(key=lambda c: c['date'])
+    from pricepilot.engine.decision_engine import _scoped_property
+    prop = _scoped_property(context['property_id'], context['account_id']) or {}
+    send_approval_request(log_id, prop.get('name', ''), row['old_price'], row['new_price'], row['occupancy'],
+                          row.get('market_avg'), '', chat_id, row.get('notes', ''), row['date'],
+                          remaining[0]['id'] if remaining else None)
+    return True
 
 
 def answer_callback_query(callback_query_id: str, text: str = "") -> Dict:
@@ -390,6 +483,14 @@ def _handle_callback(
     from pricepilot.core.database import mark_decision_rejected, update_calendar_status_for_decision
     from pricepilot.engine.decision_engine import approve_decision
 
+    if data.startswith('review_'):
+        try:
+            available = _review_pending(int(data.split('_', 1)[1]), chat_id)
+        except (ValueError, KeyError, TypeError):
+            available = False
+        answer_callback_query(callback_query_id, 'Dettagli inviati.' if available else 'Proposta scaduta o non disponibile: ricalcolare.')
+        return
+
     if data.startswith("approve_"):
         try:
             log_id = int(data.split("_", 1)[1])
@@ -397,7 +498,7 @@ def _handle_callback(
             answer_callback_query(callback_query_id, "❌ ID decisione non valido")
             return
 
-        if "*APPROVATO*" in original_text or "*RIFIUTATO*" in original_text:
+        if any(marker in original_text for marker in ("*APPROVATO*", "*RIFIUTATO*", "*NON APPLICATO*")):
             answer_callback_query(callback_query_id, "Decisione gia gestita.")
             return
 
@@ -417,6 +518,11 @@ def _handle_callback(
             payload=result,
             error="" if result.get("approved") else result.get("message", ""),
         )
+        if not result.get('approved'):
+            answer_callback_query(callback_query_id, 'Proposta non applicata: dati da aggiornare.')
+            detail = result.get('message') or 'Proposta non piu approvabile. Ricalcola dalla dashboard.'
+            edit_message_text(chat_id, message_id, original_text + f"\n\n*NON APPLICATO* - {detail}")
+            return
         if result.get("applied"):
             callback_text = "Prezzo approvato e sincronizzato."
             final_line = "*APPROVATO* - prezzo sincronizzato sul channel manager."
@@ -444,7 +550,7 @@ def _handle_callback(
             answer_callback_query(callback_query_id, "❌ ID decisione non valido")
             return
 
-        if "*APPROVATO*" in original_text or "*RIFIUTATO*" in original_text:
+        if any(marker in original_text for marker in ("*APPROVATO*", "*RIFIUTATO*", "*NON APPLICATO*")):
             answer_callback_query(callback_query_id, "Decisione gia gestita.")
             return
 
@@ -453,7 +559,10 @@ def _handle_callback(
             answer_callback_query(callback_query_id, "Decisione non disponibile per questa chat")
             return
 
-        mark_decision_rejected(log_id, context["account_id"])
+        rejected = mark_decision_rejected(log_id, context["account_id"])
+        if not rejected:
+            answer_callback_query(callback_query_id, 'Decisione gia gestita o invio in corso.')
+            return
         update_calendar_status_for_decision(
             decision_log_id=log_id,
             status="rejected",

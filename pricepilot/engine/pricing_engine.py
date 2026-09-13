@@ -13,6 +13,8 @@ Regole di business:
 """
 from datetime import date
 from typing import Dict, Optional
+import math
+from pricepilot.pricing.strategies import STRATEGIES
 
 from pricepilot.pricing.safety import (
     apply_all_safety, competitor_sanity_check, compute_dynamic_floor,
@@ -48,6 +50,7 @@ def calculate_recommended_price(
     competitor_avg: float = 0.0,
     occ_high_threshold: float = 0.80,
     max_change_pct: float = 0.20,
+    strategy_name: Optional[str] = None,
 ) -> Dict:
     """
     Calcola il prezzo raccomandato con guardrail v2 completi.
@@ -74,6 +77,13 @@ def calculate_recommended_price(
               confidence_score, breakdown, guardrail info.
     """
     d = target_date or date.today()
+    if not all(math.isfinite(float(v)) for v in (base_price, market_avg, occupancy, season_factor, event_factor)):
+        raise ValueError("Input pricing non finito.")
+    if not 0 <= occupancy <= 1 or season_factor <= 0 or event_factor <= 0 or market_avg < 0:
+        raise ValueError("Input pricing fuori intervallo.")
+    if strategy_name is not None and strategy_name not in STRATEGIES:
+        raise ValueError("Strategia sconosciuta.")
+    strategy = STRATEGIES.get(strategy_name)
 
     # Calcola days_until se non fornito
     if days_until == 999 and d >= date.today():
@@ -81,15 +91,25 @@ def calculate_recommended_price(
 
     # 1. Prezzo di partenza
     price = market_avg if market_avg > 0 else base_price
+    if strategy:
+        weight = strategy.competitor_weight if market_avg > 0 else 0
+        price = (base_price * (1 - weight) + market_avg * weight) * strategy.base_multiplier
     breakdown = {"start": round(price, 2)}
+    if strategy:
+        breakdown["strategy"] = strategy.name
+        breakdown["competitor_weight"] = strategy.competitor_weight
+        min_price = min_price * (1 + strategy.min_margin)
+    sensitivity = strategy.occupancy_sensitivity if strategy else 1.0
 
     # 2. Occupancy
     if occupancy > OCC_HIGH_THRESHOLD:
-        price *= OCC_HIGH_BOOST
-        breakdown["occupancy_boost"] = f"+{(OCC_HIGH_BOOST-1)*100:.0f}% (occ {occupancy:.0%})"
+        multiplier = 1 + (OCC_HIGH_BOOST - 1) * sensitivity
+        price *= multiplier
+        breakdown["occupancy_boost"] = f"+{(multiplier-1)*100:.0f}% (occ {occupancy:.0%})"
     elif occupancy < OCC_LOW_THRESHOLD:
-        price *= OCC_LOW_DISCOUNT
-        breakdown["occupancy_discount"] = f"{(OCC_LOW_DISCOUNT-1)*100:.0f}% (occ {occupancy:.0%})"
+        multiplier = 1 + (OCC_LOW_DISCOUNT - 1) * sensitivity
+        price *= multiplier
+        breakdown["occupancy_discount"] = f"{(multiplier-1)*100:.0f}% (occ {occupancy:.0%})"
     else:
         breakdown["occupancy"] = f"neutro ({occupancy:.0%})"
 
@@ -101,8 +121,9 @@ def calculate_recommended_price(
 
     # 4. Evento
     if has_event:
-        price *= EVENT_BOOST * event_factor
-        breakdown["event_boost"] = f"+{(EVENT_BOOST*event_factor-1)*100:.0f}%"
+        multiplier = (strategy.event_boost if strategy else EVENT_BOOST) * event_factor
+        price *= multiplier
+        breakdown["event_boost"] = f"+{(multiplier-1)*100:.0f}%"
 
     # 5. Stagionalita manuale
     if season_factor != 1.0:
@@ -151,6 +172,7 @@ def calculate_recommended_price(
         "delta_vs_market":    delta_vs_market,
         "delta_vs_base":      delta_vs_base,
         "confidence_score":   confidence,
+        "confidence_kind":    "heuristic",
         "is_weekend":         weekend,
         "has_event":          has_event,
         "breakdown":          breakdown,
@@ -171,6 +193,6 @@ def _confidence_score(competitor_count: int, market_avg: float, occupancy: float
         score += 0.2
     elif competitor_count >= 2:
         score += 0.1
-    if 0.0 < occupancy <= 1.0:
+    if 0.0 <= occupancy <= 1.0:
         score += 0.1
     return round(min(score, 1.0), 2)

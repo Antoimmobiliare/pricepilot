@@ -9,6 +9,20 @@ services:
     envVars:
       - key: PRICEPILOT_ENV
         value: staging
+      - key: PRICEPILOT_RUNTIME
+        value: api
+      - key: PRICEPILOT_DATABASE_BACKEND
+        value: supabase
+      - key: PRICEPILOT_DATA_PROVIDER
+        value: unconfigured
+      - key: PRICEPILOT_PRICING_BASIS
+        value: calendar_only
+      - key: PRICEPILOT_OCCUPANCY_PROVIDER
+        value: observed_inventory
+      - key: PRICEPILOT_CHANNEL_PROVIDER
+        value: beds24
+      - key: PRICEPILOT_ALLOW_CHANNEL_WRITES
+        value: "0"
       - key: PRICEPILOT_API_AUTH_REQUIRED
         value: "1"
       - key: PRICEPILOT_DEFAULT_ACCOUNT_ID

@@ -197,11 +197,16 @@ def get_current_user() -> dict | None:
 
 
 def get_current_account_id() -> int:
-    user = get_current_user() or {}
+    user = get_current_user()
+    if not user:
+        raise RuntimeError("Sessione utente non disponibile.")
     try:
-        return max(1, int(user.get("account_id") or 1))
+        account_id = int(user.get("account_id") or 0)
     except (TypeError, ValueError):
-        return 1
+        account_id = 0
+    if account_id <= 0:
+        raise RuntimeError("Sessione priva di un account valido. Effettua nuovamente l'accesso.")
+    return account_id
 
 
 def _get_auth_cookie() -> str:
@@ -303,8 +308,16 @@ def _selected_plan() -> str:
     return normalize_plan(st.session_state.get(_KEY_SELECTED_PLAN, "free"))
 
 
+def _plan_for_auth_view(view: str) -> str:
+    """Mantiene coerenti riepilogo e selectbox durante la registrazione."""
+    if view == "register":
+        return normalize_plan(st.session_state.get("auth_signup_plan") or _selected_plan())
+    return _selected_plan()
+
+
 def _is_production() -> bool:
-    return os.environ.get("PRICEPILOT_ENV", "").strip().lower() == "production"
+    from pricepilot.core.data_quality import live_mode
+    return live_mode()
 
 
 def _env_flag(name: str) -> bool:
@@ -368,6 +381,30 @@ def _signup_plan_requires_checkout(plan: str | None) -> bool:
 
 
 def require_auth() -> bool:
+    auth_mode = os.environ.get("PRICEPILOT_AUTH_MODE", "local").strip().lower()
+    if _is_production():
+        client = _get_client()
+        if auth_mode == "disabled":
+            st.sidebar.error(
+                "Autenticazione disabilitata non consentita in questo ambiente. "
+                "Configura Supabase Auth.",
+            )
+            _render_auth_page(client)
+            return False
+        # A local SQLite session or PricePilot cookie is not proof of a live
+        # Supabase login. Live environments accept only the in-memory session
+        # created by a successful Supabase response/redirect.
+        if get_current_user() and st.session_state.get(_KEY_SESSION) is not None and client is not None:
+            _emit_pending_auth_cookie()
+            return True
+        st.session_state.pop(_KEY_USER, None)
+        if client is None:
+            st.sidebar.error(
+                "Supabase Auth non configurato. In questo ambiente il fallback locale è disattivato.",
+            )
+        _render_auth_page(client)
+        return False
+
     current_user = get_current_user()
     if current_user:
         if not _get_auth_cookie() and not st.session_state.get(_KEY_PENDING_AUTH_COOKIE):
@@ -379,25 +416,19 @@ def require_auth() -> bool:
         _emit_pending_auth_cookie()
         return True
 
-    auth_mode = os.environ.get("PRICEPILOT_AUTH_MODE", "local").strip().lower()
     if auth_mode == "disabled":
-        if _is_production():
-            st.sidebar.error(
-                "Autenticazione disabilitata non consentita in produzione. "
-                "Configura Supabase Auth oppure cambia PRICEPILOT_ENV.",
-            )
-            _render_auth_page(_get_client())
-            return False
+        # Bypass disponibile solo in sviluppo: crea un contesto tenant esplicito
+        # invece di lasciare che il resto della dashboard assuma account 1.
+        st.session_state.setdefault(
+            _KEY_USER,
+            {"id": 1, "email": "dev@localhost", "account_id": 1, "role": "owner"},
+        )
         st.sidebar.warning(
             "Autenticazione disabilitata. Stai usando PRICEPILOT_AUTH_MODE=disabled.",
         )
         return True
 
     client = _get_client()
-    if _is_production() and client is None:
-        st.sidebar.error(
-            "Supabase Auth non configurato. In produzione il fallback locale e disattivato.",
-        )
     _render_auth_page(client)
     return False
 
@@ -965,8 +996,8 @@ def _render_landing_page():
             '<section class="pp-enterprise-hero">'
             '<span class="pp-eyebrow">Revenue management per affitti brevi</span>'
             '<h1>Pricing dinamico che lavora come un revenue manager.</h1>'
-            '<p>PricePilot monitora competitor, occupazione, stagionalità ed eventi per trasformare '
-            'ogni variazione di mercato in una decisione prezzo chiara, approvabile o automatica.</p>'
+            '<p>PricePilot legge calendario e prenotazioni del tuo alloggio e applica le regole che hai scelto '
+            'per creare una proposta di prezzo chiara, verificabile e approvabile.</p>'
             '</section>',
             unsafe_allow_html=True,
         )
@@ -983,8 +1014,8 @@ def _render_landing_page():
         )
         st.markdown(
             '<div class="pp-metric-strip">'
-            '<div><b>14</b><span>competitor confrontati</span></div>'
-            '<div><b>+19%</b><span>opportunità su date ad alta domanda</span></div>'
+            '<div><b>30 giorni</b><span>finestra occupazione per ogni data</span></div>'
+            '<div><b>6h</b><span>ciclo di analisi configurato</span></div>'
             '<div><b>1 click</b><span>approvazione cambio prezzo</span></div>'
             '</div>',
             unsafe_allow_html=True,
@@ -1024,8 +1055,8 @@ def _render_dashboard_mockup():
         </div>
         <div class="pp-kpi-clean">
           <div><span>Prezzo suggerito</span><b>&euro;172</b></div>
-          <div><span>Occupazione stimata</span><b>81%</b></div>
-          <div><span>Media competitor</span><b>&euro;154</b></div>
+          <div><span>Occupazione calendario</span><b>81%</b></div>
+          <div><span>Tariffa di riferimento</span><b>&euro;154</b></div>
           <div><span>Prossima analisi</span><b>6h</b></div>
         </div>
       </div>
@@ -1048,7 +1079,7 @@ def _render_dashboard_mockup():
         </div>
         <div class="pp-telegram-clean">
           <h4>Telegram approval</h4>
-          <p>Nuovo prezzo suggerito: <strong>&euro;145 &rarr; &euro;172</strong><br>Motivo: evento locale, weekend e competitor sopra media.</p>
+          <p>Nuovo prezzo suggerito: <strong>&euro;145 &rarr; &euro;172</strong><br>Motivo: occupazione sopra la soglia e regola weekend.</p>
           <div class="pp-tg-actions">
             <span>Approva</span><span>Rifiuta</span>
           </div>
@@ -1098,7 +1129,7 @@ def _render_dashboard_mockup():
         </div>
         <div>
           <div class="pp-mini-kpi"><span>Prezzo suggerito oggi</span><b>&euro;172</b></div>
-          <div class="pp-mini-kpi"><span>Media mercato</span><b>&euro;154</b></div>
+          <div class="pp-mini-kpi"><span>Tariffa di riferimento</span><b>&euro;154</b></div>
           <div class="pp-mini-kpi"><span>Prossima analisi</span><b>6h</b></div>
         </div>
       </div>
@@ -1118,7 +1149,7 @@ def _render_dashboard_mockup():
           <div class="pp-telegram-head"><span>Telegram approval</span><span>Plus</span></div>
           <div style="color:#beafa5;font-size:.78rem">Nuovo prezzo suggerito</div>
           <div class="pp-telegram-price">&euro;145 &rarr; &euro;172</div>
-          <div style="color:#beafa5;font-size:.75rem;margin-bottom:10px">Motivo: evento + domanda weekend + competitor sopra media.</div>
+          <div style="color:#beafa5;font-size:.75rem;margin-bottom:10px">Motivo: occupazione calendario + regola weekend.</div>
           <div class="pp-telegram-actions">
             <div class="pp-tg-approve">Approva</div>
             <div class="pp-tg-reject">Rifiuta</div>
@@ -1148,8 +1179,8 @@ def _render_social_proof_section():
         <span>Guesty</span><span>Beds24</span><span>Smoobu</span><span>Lodgify</span>
       </div>
       <div class="pp-proof-metrics">
-        <div><b>6h</b><span>ciclo analisi mercato configurabile</span></div>
-        <div><b>+19%</b><span>opportunità media su date ad alta domanda</span></div>
+        <div><b>6h</b><span>ciclo di analisi calendario configurabile</span></div>
+        <div><b>30 giorni</b><span>occupazione calcolata sulle notti vendibili</span></div>
         <div><b>1 click</b><span>approval Telegram per il piano Plus</span></div>
         <div><b>25</b><span>proprietà gestibili nel piano Pro</span></div>
       </div>
@@ -1160,15 +1191,14 @@ def _render_social_proof_section():
 def _render_problem_solution_section():
     st.markdown(
         '<section class="pp-dark">'
-        '<h2>Cambiare i prezzi a mano ti fa perdere ricavi</h2>'
-        '<p>Mercato, eventi, weekend e competitor cambiano continuamente. '
-        'PricePilot monitora questi segnali e ti aiuta a prendere decisioni di prezzo '
-        'più veloci e motivate.</p>'
+        '<h2>Gestire ogni data a mano richiede tempo e disciplina</h2>'
+        '<p>Disponibilità, anticipo, weekend e nuove prenotazioni cambiano continuamente. '
+        'PricePilot controlla questi segnali del tuo calendario e ti aiuta a prendere decisioni di prezzo motivate.</p>'
         '<div class="pp-dark-grid">'
         '<div class="pp-card"><div class="pp-icon">!</div><h3>Prima</h3>'
         '<p>Prezzi aggiornati manualmente, spesso troppo tardi.</p></div>'
         '<div class="pp-card"><div class="pp-icon">→</div><h3>Con PricePilot</h3>'
-        '<p>Suggerimenti automatici basati su mercato e occupazione.</p></div>'
+        '<p>Suggerimenti automatici basati sul calendario e sulle tue regole.</p></div>'
         '<div class="pp-card"><div class="pp-icon">✓</div><h3>Risultato</h3>'
         '<p>Più controllo, meno tempo perso, più opportunità di revenue.</p></div>'
         '</div>'
@@ -1182,19 +1212,19 @@ def _render_features_section():
     st.markdown(
         '<section class="pp-section" style="padding-bottom:24px !important">'
         '<h2>Un sistema operativo per il pricing.</h2>'
-        '<p class="pp-section-lead">PricePilot combina dati di mercato, regole commerciali e approvazioni operative in un flusso pensato per host e property manager.</p>'
+        '<p class="pp-section-lead">PricePilot combina il calendario del tuo alloggio, regole commerciali esplicite e approvazioni operative in un unico flusso.</p>'
         '</section>',
         unsafe_allow_html=True,
     )
     st.markdown("""
     <section class="pp-feature-row">
       <div class="pp-feature-copy">
-        <div class="pp-feature-kicker">Analisi competitor</div>
-        <h2>Capisci se stai vendendo sotto mercato.</h2>
-        <p>Confronta strutture simili, legge la media mercato e segnala quando il tuo prezzo rischia di lasciare revenue sul tavolo.</p>
+        <div class="pp-feature-kicker">Calendario reale</div>
+        <h2>Capisci quali date richiedono attenzione.</h2>
+        <p>Legge disponibilità e prenotazioni del tuo alloggio e segnala le date che incontrano le soglie impostate.</p>
         <div class="pp-feature-points">
-          <span>Confronto prezzi su immobili comparabili</span>
-          <span>Posizione sopra, sotto o in linea con il mercato</span>
+          <span>Occupazione calcolata sulle notti vendibili</span>
+          <span>Blocchi separati dalle prenotazioni confermate</span>
           <span>Motivazioni leggibili per ogni raccomandazione</span>
         </div>
       </div>
@@ -1202,9 +1232,9 @@ def _render_features_section():
         <div class="pp-shot-label">Market position</div>
         <div class="pp-mini-shot-grid">
           <div class="pp-mini-card"><small>Tu</small><b>&euro;145</b></div>
-          <div class="pp-mini-card"><small>Media mercato</small><b>&euro;158</b></div>
-          <div class="pp-mini-card"><small>Gap revenue</small><b style="color:#B5523A">+9%</b></div>
-          <div class="pp-mini-card"><small>Competitor letti</small><b>14</b></div>
+          <div class="pp-mini-card"><small>Riferimento</small><b>&euro;158</b></div>
+          <div class="pp-mini-card"><small>Occupazione</small><b style="color:#B5523A">72%</b></div>
+          <div class="pp-mini-card"><small>Anticipo</small><b>12 giorni</b></div>
         </div>
       </div>
     </section>
@@ -1212,7 +1242,7 @@ def _render_features_section():
       <div class="pp-feature-copy">
         <div class="pp-feature-kicker">Occupancy & stagionalità</div>
         <h2>Prezzi sensibili alla domanda reale.</h2>
-        <p>Weekend, eventi, stagionalità e occupazione cambiano il valore di una notte. PricePilot li traduce in range prezzo controllati.</p>
+        <p>Anticipo, weekend, occupazione e piccoli vuoti tra prenotazioni attivano solo le regole che hai salvato, entro limiti controllati.</p>
         <div class="pp-feature-points">
           <span>Ricalcolo periodico ogni 6 ore</span>
           <span>Range minimo e massimo sempre rispettati</span>
@@ -1245,7 +1275,7 @@ def _render_features_section():
       <div class="pp-mini-shot dark">
         <div class="pp-telegram-clean">
           <h4>PricePilot · proposta prezzo</h4>
-          <p>Villa Centro<br><strong>&euro;145 &rarr; &euro;172</strong><br>Motivo: competitor + evento + alta domanda.</p>
+          <p>Villa Centro<br><strong>&euro;145 &rarr; &euro;172</strong><br>Motivo: occupazione sopra soglia + weekend.</p>
           <div class="pp-tg-actions"><span>Approva</span><span>Rifiuta</span></div>
         </div>
       </div>
@@ -1281,8 +1311,8 @@ def _render_features_section():
         unsafe_allow_html=True,
     )
     features = [
-        ("📈", "Prezzi sempre aggiornati", "PricePilot ricalcola i prezzi in base a mercato, domanda e occupazione."),
-        ("🏘️", "Analisi competitor", "Confronta strutture simili e capisce se sei sopra, sotto o in linea col mercato."),
+        ("📈", "Proposte periodiche", "PricePilot ricalcola le proposte in base a calendario, anticipo e occupazione."),
+        ("📅", "Calendario verificabile", "Separa notti vendibili, prenotate e bloccate prima di calcolare l’occupazione."),
         ("📲", "Telegram approval", "Nel piano Plus approvi ogni cambio prezzo da Telegram prima che venga applicato."),
         ("🤖", "Autopilot completo", "Nel piano Pro PricePilot aggiorna i prezzi automaticamente e ti invia il riepilogo."),
         ("📅", "Calendario smart", "Visualizzi prezzi consigliati, weekend, eventi, override e giorni bloccati."),
@@ -1317,8 +1347,8 @@ def _render_how_it_works_section():
         </div>
         <div class="pp-time-step">
           <strong>2</strong>
-          <h3>Analizza il mercato</h3>
-          <p>Competitor, occupancy, eventi e stagionalità vengono trasformati in una raccomandazione leggibile.</p>
+          <h3>Analizza il calendario</h3>
+          <p>Disponibilità, prenotazioni, anticipo e regole salvate diventano una proposta leggibile.</p>
         </div>
         <div class="pp-time-step">
           <strong>3</strong>
@@ -1339,8 +1369,8 @@ def _render_how_it_works_section():
     steps = [
         ("1", "Collega la proprietà", "Inserisci OTA, città, prezzo minimo e massimo.",
          [("OTA", "Airbnb / Booking"), ("Zona", "Centro storico"), ("Range", "&euro;80 - &euro;220")]),
-        ("2", "PricePilot analizza il mercato", "Competitor, occupancy, eventi, weekend e stagionalità.",
-         [("Competitor", "14 simili"), ("Domanda", "Alta"), ("Evento", "Fiera weekend")]),
+        ("2", "PricePilot analizza il calendario", "Occupazione, anticipo, weekend e vuoti tra prenotazioni.",
+         [("Occupazione", "72%"), ("Anticipo", "12 giorni"), ("Regola", "Weekend")]),
         ("3", "Approvi o automatizzi", "Free: cambi manualmente. Plus: approvi da Telegram. Pro: autopilot completo.",
          [("Free", "Suggerisce"), ("Plus", "Approvi"), ("Pro", "Applica")]),
     ]
@@ -1375,7 +1405,7 @@ def _render_pricing_section():
         "EUR 0",
         "Manual pricing assistant",
         "Suggerimenti prezzo e dashboard per aggiornare manualmente le OTA.",
-        ["1 proprietà", "Analisi competitor", "Suggerimenti prezzo", "Calendario smart", "Aggiornamenti ogni 6h"],
+        ["1 proprietà", "Analisi calendario", "Suggerimenti prezzo", "Regole controllate", "Aggiornamenti ogni 6h"],
         "Inizia Gratis",
         mode="Suggerisce",
         missing=["Telegram approval", "Aggiornamento automatico OTA"],
@@ -1416,9 +1446,9 @@ def _render_pricing_section():
     annual = st.toggle("Mostra prezzo annuale", value=False, key="public_pricing_annual")
     cols = st.columns(3)
     _pricing_card(cols[0], "free", "EUR 0", "Manual pricing assistant",
-    "PricePilot analizza il mercato e ti suggerisce il prezzo. Tu lo aggiorni manualmente sulle OTA.", [
+    "PricePilot analizza il tuo calendario e suggerisce il prezzo. Tu lo aggiorni manualmente sulle OTA.", [
         "1 proprietà",
-        "Analisi competitor",
+        "Analisi calendario",
         "Suggerimenti prezzo motivati",
         "Calendario smart",
         "Dashboard base",
@@ -1493,8 +1523,8 @@ def _render_faq_section():
         st.write("PricePilot è progettato per lavorare con OTA e channel manager tramite API/PMS. La landing mostra il flusso previsto; le integrazioni reali si collegano tramite provider.")
     with st.expander("Posso usarlo con una sola proprietà?"):
         st.write("Sì. Il piano Free è pensato per partire con una proprietà e capire subito come PricePilot ragiona sui prezzi.")
-    with st.expander("Ogni quanto analizza il mercato?"):
-        st.write("Il ciclo operativo può analizzare mercato e proprietà ogni 6 ore, in base al piano e alle impostazioni.")
+    with st.expander("Ogni quanto analizza il calendario?"):
+        st.write("Il ciclo operativo può analizzare calendario e regole ogni 6 ore, in base al piano e alle impostazioni.")
     st.markdown("</div>", unsafe_allow_html=True)
     return
     st.markdown('<span id="faq"></span>', unsafe_allow_html=True)
@@ -1512,7 +1542,7 @@ def _render_faq_section():
     with st.expander("Posso usarlo con una sola proprietà?"):
         st.write("Sì, il piano Free è pensato proprio per iniziare con una proprietà.")
     with st.expander("Ogni quanto aggiorna i prezzi?"):
-        st.write("Il sistema può analizzare il mercato ogni 6 ore, in base al piano e alle impostazioni.")
+        st.write("Il sistema può analizzare il calendario ogni 6 ore, in base al piano e alle impostazioni.")
 
 
 def _render_final_cta_section():
@@ -1530,7 +1560,7 @@ def _render_final_cta_section():
     return
     st.markdown(
         '<section class="pp-final-cta">'
-        '<h2>Smetti di inseguire il mercato. Lascia che PricePilot lavori per te.</h2>'
+        '<h2>Trasforma il tuo calendario in decisioni di prezzo controllate.</h2>'
         '<p>Parti con una proprietà. Passa a Plus o Pro quando vuoi automatizzare.</p>'
         '</section>',
         unsafe_allow_html=True,
@@ -1594,7 +1624,7 @@ def _render_auth_panel(client, view: str):
 
     _, col, _ = st.columns([1, 1.25, 1])
     with col:
-        plan = _selected_plan()
+        plan = _plan_for_auth_view(view)
         with st.container(border=True, key=f"pp_auth_card_{view}"):
             st.markdown(
                 f'<span class="pp-plan-pill">Piano scelto: {get_plan(plan)["label"]}</span>'
@@ -1657,8 +1687,9 @@ def _render_auth_panel(client, view: str):
                 st.session_state[_KEY_SELECTED_PLAN] = selected_plan
                 if _signup_plan_requires_checkout(selected_plan):
                     st.info(
-                        "Il piano scelto verra attivato dopo il checkout. "
-                        "Intanto l'account parte dal piano Free.",
+                        "Puoi creare e confermare l'account senza addebiti. "
+                        "Dopo l'accesso potrai completare il pagamento e attivare il piano scelto; "
+                        "fino a quel momento restano disponibili le funzioni Free.",
                     )
                 signup_pw = st.text_input(
                     "Password",
@@ -1706,7 +1737,13 @@ def _render_auth_panel(client, view: str):
                 st.warning(
                     "Supabase non è configurato. In produzione il login locale è disattivato.",
                 )
-            st.caption(f"Auth {auth_label}. Dopo la registrazione entrerai nell'onboarding iniziale.")
+            if client is not None:
+                st.caption(
+                    f"Auth {auth_label}. Dopo la conferma email, accedi da questo dispositivo "
+                    "e completa la prima proprietà."
+                )
+            else:
+                st.caption(f"Auth {auth_label}. Dopo la registrazione completerai la prima proprietà.")
             if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
                 _go_public("landing")
 
@@ -1862,24 +1899,23 @@ def _do_signup(
             st.success("Account creato.")
             st.rerun()
         elif user and getattr(user, "id", None):
-            local_user = _ensure_external_user(
-                email=getattr(user, "email", email),
-                external_user_id=getattr(user, "id", ""),
-                plan=account_plan,
-                account_name=account_name,
+            # Senza sessione l'indirizzo non e ancora confermato. L'account dati
+            # viene creato soltanto al primo login verificato, evitando account
+            # orfani e associazioni a tenant preesistenti.
+            st.session_state[_KEY_PUBLIC_VIEW] = "login"
+            st.session_state["auth_login_email"] = email
+            st.session_state[_KEY_AUTH_NOTICE] = (
+                "Email di conferma inviata. Se la apri dal telefono, torna poi su questo PC "
+                "e accedi con la stessa email e password."
             )
-            _record_signup_consent(
-                local_user,
-                terms_accepted=terms_accepted,
-                marketing_accepted=marketing_accepted,
-                accepted_at=consented_at,
-                source="signup_pending_email",
-                supabase_user_id=str(getattr(user, "id", "") or ""),
-                sync_remote=False,
-            )
-            st.info("Registrazione completata. Controlla la email e poi accedi.")
+            st.rerun()
         else:
-            st.info("Registrazione completata. Controlla la email e poi accedi.")
+            st.session_state[_KEY_PUBLIC_VIEW] = "login"
+            st.session_state["auth_login_email"] = email
+            st.session_state[_KEY_AUTH_NOTICE] = (
+                "Email di conferma inviata. Dopo averla confermata, accedi da questo dispositivo."
+            )
+            st.rerun()
     except Exception as exc:
         _handle_auth_error(exc, context="registrazione")
 
@@ -1899,9 +1935,9 @@ def _store_supabase_session(resp, account_name: str = "", plan: str | None = Non
             account_name=account_name or metadata.get("account_name", ""),
         )
         _set_local_session(local_user)
-        if local_user:
-            _queue_auth_cookie(create_auth_session(int(local_user["id"])))
-        account = get_account(int((local_user or {}).get("account_id") or 1))
+        account_id = get_current_account_id()
+        _queue_auth_cookie(create_auth_session(int(local_user["id"])))
+        account = get_account(account_id)
         if not is_supabase_primary():
             sync_account_membership_to_supabase(
                 account or {},
@@ -1935,7 +1971,9 @@ def _record_signup_consent(
         return None
 
     user_id = int(local_user.get("id") or 0)
-    account_id = int(local_user.get("account_id") or 1)
+    account_id = int(local_user.get("account_id") or 0)
+    if user_id <= 0 or account_id <= 0:
+        raise RuntimeError("Consenso non associabile a un utente e account validi.")
     existing = get_latest_user_consent(user_id) if only_if_missing else None
     if existing and existing.get("terms_accepted") and existing.get("privacy_accepted"):
         consent = existing
@@ -1987,11 +2025,18 @@ def _verify_password(password: str, stored: str) -> bool:
 
 def _set_local_session(user: dict | None):
     if not user:
-        return
+        raise RuntimeError("Supabase non ha restituito un profilo PricePilot valido.")
+    try:
+        user_id = int(user.get("id") or 0)
+        account_id = int(user.get("account_id") or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Profilo PricePilot non valido.") from exc
+    if user_id <= 0 or account_id <= 0:
+        raise RuntimeError("Profilo PricePilot privo di utente o account valido.")
     st.session_state[_KEY_USER] = {
-        "id": int(user["id"]),
+        "id": user_id,
         "email": user.get("email", ""),
-        "account_id": int(user.get("account_id") or 1),
+        "account_id": account_id,
         "role": user.get("role", "owner"),
     }
 

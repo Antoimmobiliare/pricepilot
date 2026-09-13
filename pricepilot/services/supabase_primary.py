@@ -152,7 +152,7 @@ def _scoped_filters(table: str, filters: Optional[Dict[str, Any]] = None) -> Dic
     scansioni multi-account; la dashboard puo operare solo sul suo account.
     """
     result = dict(filters or {})
-    if table not in _ACCOUNT_SCOPED_TABLES or "account_id" in result:
+    if table not in _ACCOUNT_SCOPED_TABLES:
         return result
     if has_supabase_auth_session() or server_runtime():
         return result
@@ -160,6 +160,11 @@ def _scoped_filters(table: str, filters: Optional[Dict[str, Any]] = None) -> Dic
     if account_id is None:
         raise CloudDatabaseUnavailable(
             f"Query cloud non circoscritta all'account per la tabella '{table}'."
+        )
+    explicit_account_id = result.get("account_id")
+    if explicit_account_id is not None and int(explicit_account_id) != account_id:
+        raise CloudDatabaseUnavailable(
+            f"Query cloud richiesta per un account diverso dalla sessione sulla tabella '{table}'."
         )
     result["account_id"] = account_id
     return result
@@ -325,11 +330,30 @@ def _cloud_user_from_profile(profile: Dict, account_id: Optional[int] = None) ->
         "account_members",
         filters={"user_id": profile_id, "account_id": account_id} if account_id else {"user_id": profile_id},
         order=("created_at", False),
-        limit=1,
     )
-    membership = _one(memberships)
-    if not membership:
+    valid: list[Dict] = []
+    for membership in memberships:
+        membership_account_id = membership.get("account_id")
+        if membership_account_id is None:
+            continue
+        role = str(membership.get("role") or "member").lower()
+        if role == "owner":
+            account = _one(_select("accounts", filters={"id": int(membership_account_id)}, limit=1))
+            if not account or str(account.get("owner_user_id") or "") != profile_id:
+                # Una vecchia riga di test non puo trasformare un nuovo login
+                # nel proprietario di un account altrui.
+                continue
+        valid.append(membership)
+
+    if not valid:
         return None
+    owner_memberships = [m for m in valid if str(m.get("role") or "").lower() == "owner"]
+    candidates = owner_memberships or valid
+    if len(candidates) != 1:
+        raise CloudDatabaseUnavailable(
+            "Il profilo appartiene a piu account PricePilot: selezione automatica non sicura."
+        )
+    membership = candidates[0]
     return {
         "id": int(local_id),
         "account_id": int(membership["account_id"]),
@@ -586,16 +610,20 @@ def upsert_property(prop: Dict) -> int:
     return _id_from_row(row, "properties")
 
 
-def get_properties() -> list[Dict]:
-    return _legacy_rows(_select("properties", order=("local_id", False)))
+def get_properties(account_id: Optional[int] = None) -> list[Dict]:
+    filters = {"account_id": int(account_id)} if account_id is not None else {}
+    return _legacy_rows(_select("properties", filters=filters, order=("local_id", False)))
 
 
-def get_property(prop_id: int) -> Optional[Dict]:
-    return _legacy_row(_one(_select("properties", filters={"local_id": int(prop_id)}, limit=1)))
+def get_property(prop_id: int, account_id: Optional[int] = None) -> Optional[Dict]:
+    filters = {"local_id": int(prop_id)}
+    if account_id is not None:
+        filters["account_id"] = int(account_id)
+    return _legacy_row(_one(_select("properties", filters=filters, limit=1)))
 
 
-def delete_property(prop_id: int) -> None:
-    prop = get_property(prop_id)
+def delete_property(prop_id: int, account_id: Optional[int] = None) -> None:
+    prop = get_property(prop_id, account_id)
     if not prop:
         return
     account_id = int(prop["account_id"])
@@ -849,6 +877,12 @@ def get_decision_log_entry(log_id: int, account_id: Optional[int] = None) -> Opt
     return _legacy_row(_one(_select("decision_log", filters=filters, limit=1)))
 
 
+def claim_decision_application(log_id: int, account_id: int, expected: str) -> bool:
+    rows = _update("decision_log", {"decision": expected + " [APPLYING]"}, filters={
+        "account_id": int(account_id), "local_id": int(log_id), "applied": False, "decision": expected})
+    return len(rows) == 1
+
+
 def update_decision_state(log_id: int, *, account_id: int, applied: bool, decision: str) -> Optional[Dict]:
     _update("decision_log", {"applied": bool(applied), "decision": decision},
             filters={"account_id": int(account_id), "local_id": int(log_id)})
@@ -860,9 +894,14 @@ def mark_decision_rejected(log_id: int, account_id: int) -> Optional[Dict]:
     if not row:
         return None
     decision = str(row.get("decision") or "")
-    if "[REJECTED]" not in decision:
-        decision = f"{decision} [REJECTED]".strip()
-    return update_decision_state(log_id, account_id=int(account_id), applied=False, decision=decision)
+    if row.get("applied") or not decision.startswith("PENDING_APPROVAL") or any(
+            tag in decision for tag in ("[APPLYING]", "[REJECTED]", "[APPROVED_")):
+        return None
+    rejected = f"{decision} [REJECTED]"
+    rows = _update("decision_log", {"decision": rejected}, filters={
+        "account_id": int(account_id), "local_id": int(log_id),
+        "applied": False, "decision": decision})
+    return get_decision_log_entry(log_id, account_id) if len(rows) == 1 else None
 
 
 def save_occupancy(property_id: int, date_str: str, occupancy: float, source: str = "manual", account_id: int = 1) -> None:

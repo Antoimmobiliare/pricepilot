@@ -28,8 +28,19 @@ jobs:
           : "${PRICEPILOT_API_BASE_URL:?Missing repository secret PRICEPILOT_API_BASE_URL}"
           : "${PRICEPILOT_SCHEDULER_KEY:?Missing repository secret PRICEPILOT_SCHEDULER_KEY}"
 
-          curl --fail-with-body --show-error --silent \
-            --retry 2 --retry-all-errors --connect-timeout 20 --max-time 240 \
+          # A timeout can occur after price writes. Do not replay the POST automatically.
+          response_file="${RUNNER_TEMP}/pricepilot-cycle-response.json"
+          curl --fail --show-error --silent \
+            --connect-timeout 20 --max-time 240 \
             -X POST "${PRICEPILOT_API_BASE_URL%/}/internal/scheduled-pricing-cycle" \
             -H "X-PricePilot-Scheduler-Key: ${PRICEPILOT_SCHEDULER_KEY}" \
-            -H "Accept: application/json"
+            -H "Accept: application/json" \
+            --output "$response_file"
+          python3 - "$response_file" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as source:
+              result = json.load(source)
+          if result.get("ok") is not True or result.get("errors"):
+              raise SystemExit("Pricing cycle incomplete; inspect authenticated operation logs.")
+          print("Pricing cycle completed.")
+          PY

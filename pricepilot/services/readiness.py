@@ -1,89 +1,96 @@
-"""
-PricePilot - Account readiness checks.
+"""Readiness is evidence, not a percentage of profile fields completed."""
+from datetime import date, datetime, timedelta, timezone
+import os
 
-Small product-level checklist used before enabling channel manager/API work.
-"""
-from __future__ import annotations
-
-from datetime import date
-from typing import Dict, List
-
-from pricepilot.core.database import (
-    get_account,
-    get_guardrail_policy,
-    init_db,
-    get_notification_preferences,
-    get_properties,
-    get_telegram_link_by_property,
-    get_current_price_for_date,
-)
+from pricepilot.core.database import get_account, get_properties, get_telegram_link_by_property
 from pricepilot.core.plans import get_plan
+from pricepilot.services.operational_store import get_calendar_policy, get_connection, get_inventory_rows
+from pricepilot.providers.observations import fresh_timestamp
+from pricepilot.engine.calendar_pricing import validate_policy
 
 
-def account_readiness(account_id: int = 1) -> Dict:
-    init_db()
-    account = get_account(account_id) or {"id": account_id, "plan": "free"}
-    plan = get_plan(account.get("plan"))
-    properties = [p for p in get_properties() if int(p.get("account_id") or 1) == account_id]
-    guardrails = get_guardrail_policy(account_id)
-    notifications = get_notification_preferences(account_id)
+def _check(key, label, ok, detail='', required=True):
+    return dict(key=key, label=label, ok=bool(ok), detail=detail, required=required)
 
-    checks: List[Dict] = []
-    checks.append(_check("account", "Account configurato", True, "Profilo di lavoro pronto."))
-    checks.append(_check("billing", "Stato abbonamento", bool(account.get("billing_status")), _billing_detail(account.get("billing_status"))))
-    checks.append(_check("properties", "Almeno una proprieta", bool(properties), f"{len(properties)} proprieta configurate."))
-    checks.append(_check("plan", "Piano attivo", account.get("plan") in ("free", "plus", "pro"), plan["label"]))
-    checks.append(_check("guardrails", "Regole sicurezza prezzi", bool(guardrails), "Limiti di variazione e controlli automatici presenti."))
-    checks.append(_check("notifications", "Notifiche configurate", bool(notifications), "Preferenze Telegram e report presenti."))
 
+def property_readiness(account_id, property_id):
+    props = get_properties(account_id=account_id)
+    prop = next((p for p in props if p['id'] == property_id), None)
+    if not prop:
+        raise ValueError('Appartamento non appartenente all’account.')
+    checks = []
+    checks.append(_check('price_bounds', 'Limiti prezzo',
+        0 < float(prop.get('min_price') or 0) < float(prop.get('max_price') or 0), 'Minimo e massimo per notte.'))
+    policy = connection = None
+    rows = []
+    try:
+        policy = get_calendar_policy(account_id, property_id)
+        connection = get_connection(account_id, property_id)
+        rows = get_inventory_rows(account_id, property_id, date.today(), date.today()+timedelta(days=30))
+        storage_ok = True
+    except (RuntimeError, ValueError):
+        storage_ok = False
+    checks.append(_check('storage', 'Archivio operativo', storage_ok, 'Database disponibile.' if storage_ok else 'Verifica database e migrazioni operative.'))
+    policy_ok = bool(policy and policy.get('enabled'))
+    if policy_ok:
+        try:
+            validate_policy(policy)
+        except (KeyError, TypeError, ValueError):
+            policy_ok = False
+    checks.append(_check('policy', 'Strategie valide e abilitate', policy_ok,
+                         'Configura tariffa di riferimento e regole in Proprietà.'))
+    checks.append(_check('connection', 'Collegamento Beds24 abilitato', bool(connection and connection.get('enabled')),
+                         'Configura gli ID in Integrazioni.'))
+    credentials = connection and (
+        os.getenv(connection.get('token_env', ''), '').strip()
+        or os.getenv(connection.get('refresh_token_env', ''), '').strip()
+    )
+    checks.append(_check('credentials', 'Credenziali installate', bool(credentials), 'Presenza verificata; la validità richiede una lettura reale.'))
+    inventory_ok = len(rows) == 30
+    try:
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            fresh_timestamp(row.get('observed_at'), now)
+    except (ValueError, TypeError):
+        inventory_ok = False
+    checks.append(_check('inventory', 'Calendario completo e aggiornato', inventory_ok,
+        'Verificati 30 giorni con osservazioni entro 6 ore.' if inventory_ok else 'Acquisisci un calendario completo; dati assenti o scaduti non generano proposte.'))
+    tg = get_telegram_link_by_property(property_id)
+    linked = bool(tg and tg.get('active') and tg.get('chat_id'))
+    checks.append(_check('telegram', 'Telegram collegato', linked, 'Collega il tuo account nella sezione Telegram.'))
+    from pricepilot.services.telegram_bot import is_configured
+    checks.append(_check('telegram_bot', 'Bot Telegram configurato', is_configured(), 'Credenziali del bot installate sul server.'))
+    checks.append(_check('channel_writes', 'Invio prezzi abilitato', os.getenv('PRICEPILOT_ALLOW_CHANNEL_WRITES') == '1',
+        'Da attivare solo dopo una prova reale di lettura e scrittura Beds24.', required=False))
+    states = {c['key']: c['ok'] for c in checks}
+    configured = all(states[k] for k in {'price_bounds', 'storage', 'policy'})
+    analysis_ready = configured and states['connection'] and states['credentials'] and states['inventory']
+    approval_ready = analysis_ready and states['telegram'] and states['telegram_bot']
+    write_ready = approval_ready and states['channel_writes']
+    return {'checks': checks, 'analysis_ready': analysis_ready,
+            'approval_ready': approval_ready, 'write_ready': write_ready,
+            'ready': write_ready, 'configured': configured,
+            'observed_at': min((r['observed_at'] for r in rows), default=None)}
+
+
+def account_readiness(account_id=1):
+    account = get_account(account_id) or {}
+    properties = get_properties(account_id=account_id)
+    checks = [_check('properties', 'Almeno un appartamento', bool(properties), 'Aggiungi un appartamento in Proprietà.')]
+    property_states = []
     for prop in properties:
-        prefix = f"property:{prop['id']}"
-        checks.append(_check(prefix + ":name", f"{prop['name']} - dati base", bool(prop.get("city")), "Citta/zona impostata." if prop.get("city") else "Aggiungi citta/zona."))
-        checks.append(_check(prefix + ":price_bounds", f"{prop['name']} - limiti prezzo", float(prop.get("min_price", 0)) < float(prop.get("max_price", 0)), "Min/max validi."))
-        _, price_source = get_current_price_for_date(prop, date.today().isoformat())
-        checks.append(_check(
-            prefix + ":current_price",
-            f"{prop['name']} - prezzo attuale",
-            price_source != "price_range_midpoint",
-            "Prezzo corrente impostato." if price_source != "price_range_midpoint" else "Imposta il prezzo attuale dalla sezione Prezzi attuali.",
-        ))
-        tg = get_telegram_link_by_property(int(prop["id"]))
-        checks.append(_check(prefix + ":telegram", f"{prop['name']} - Telegram", bool(tg and tg.get("chat_id")), "Collegato." if tg and tg.get("chat_id") else "Collega Telegram per notifiche reali."))
-        checks.append(_check(prefix + ":ota", f"{prop['name']} - OTA", bool(prop.get("listing_url") or prop.get("listing_id")), "Listing identificato." if prop.get("listing_url") or prop.get("listing_id") else "Aggiungi URL o listing id."))
-
-    required = [c for c in checks if c["required"]]
-    passed = [c for c in required if c["ok"]]
-    score = round(len(passed) / len(required) * 100, 1) if required else 100.0
-
-    blockers = [c for c in checks if c["required"] and not c["ok"]]
-    warnings = [c for c in checks if not c["required"] and not c["ok"]]
-    return {
-        "account_id": account_id,
-        "plan": plan,
-        "score": score,
-        "ready": score >= 80 and not blockers,
-        "checks": checks,
-        "blockers": blockers,
-        "warnings": warnings,
-    }
-
-
-def _check(key: str, label: str, ok: bool, detail: str = "", required: bool = True) -> Dict:
-    return {
-        "key": key,
-        "label": label,
-        "ok": bool(ok),
-        "detail": detail,
-        "required": required,
-    }
-
-
-def _billing_detail(status: str | None) -> str:
-    labels = {
-        "dev": "Demo locale: nessun pagamento reale collegato.",
-        "trialing": "Prova gratuita attiva.",
-        "active": "Abbonamento attivo.",
-        "past_due": "Pagamento da verificare.",
-        "canceled": "Abbonamento disattivato.",
-    }
-    return labels.get((status or "").lower(), status or "Non configurato.")
+        state = property_readiness(account_id, prop['id'])
+        property_states.append(state)
+        for check in state['checks']:
+            checks.append({**check, 'key': f"property:{prop['id']}:{check['key']}", 'label': f"{prop['name']} — {check['label']}"})
+    required = [c for c in checks if c['required']]
+    blockers = [c for c in required if not c['ok']]
+    warnings = [c for c in checks if not c['required'] and not c['ok']]
+    return dict(account_id=account_id, plan=get_plan(account.get('plan')), checks=checks,
+                blockers=blockers, warnings=warnings,
+                configured=bool(properties) and all(s['configured'] for s in property_states),
+                analysis_ready=bool(properties) and all(s['analysis_ready'] for s in property_states),
+                approval_ready=bool(properties) and all(s['approval_ready'] for s in property_states),
+                write_ready=bool(properties) and all(s['write_ready'] for s in property_states),
+                ready=bool(properties) and all(s['write_ready'] for s in property_states),
+                score=round(100*sum(c['ok'] for c in required)/len(required), 1) if required else 0.0)

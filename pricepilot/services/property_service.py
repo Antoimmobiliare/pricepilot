@@ -27,7 +27,7 @@ def list_properties(account_id: Optional[int] = None) -> List[Dict]:
     """Ritorna le proprieta dell'account, o tutte in modalita admin/dev."""
     if account_id is not None and not is_supabase_primary():
         refresh_properties_from_supabase(int(account_id))
-    props = get_properties()
+    props = get_properties(account_id=account_id)
     if account_id is None:
         return props
     scoped = [p for p in props if int(p.get("account_id") or 1) == int(account_id)]
@@ -38,7 +38,7 @@ def list_properties(account_id: Optional[int] = None) -> List[Dict]:
 
 def get_property_by_id(prop_id: int, account_id: Optional[int] = None) -> Optional[Dict]:
     """Ritorna una proprieta per id, rispettando l'account se passato."""
-    prop = get_property(prop_id)
+    prop = get_property(prop_id, account_id=account_id)
     if not prop:
         return None
     if account_id is not None and int(prop.get("account_id") or 1) != int(account_id):
@@ -54,7 +54,7 @@ def create_property(data: Dict) -> Dict:
     _validate(data)
     _enforce_property_limit(data)
     new_id = upsert_property(data)
-    prop   = get_property(new_id)
+    prop   = get_property(new_id, account_id=int(data.get("account_id") or 1))
     if not is_supabase_primary():
         sync_property_and_pricing_to_supabase(prop)
     logger.info(f"Proprietà creata: id={new_id} name={data['name']}")
@@ -63,27 +63,28 @@ def create_property(data: Dict) -> Dict:
 
 def update_property(prop_id: int, data: Dict) -> Optional[Dict]:
     """Aggiorna una proprietà esistente."""
-    existing = get_property(prop_id)
+    account_id = int(data.get("account_id") or 1)
+    existing = get_property(prop_id, account_id=account_id)
     if not existing:
         return None
     merged = {**existing, **data, "id": prop_id}
     _validate(merged)
     upsert_property(merged)
-    updated = get_property(prop_id)
+    updated = get_property(prop_id, account_id=account_id)
     if updated and not is_supabase_primary():
         sync_property_and_pricing_to_supabase(updated)
     logger.info(f"Proprietà aggiornata: id={prop_id}")
     return updated
 
 
-def remove_property(prop_id: int) -> bool:
+def remove_property(prop_id: int, account_id: Optional[int] = None) -> bool:
     """Rimuove una proprietà. Ritorna True se esisteva."""
-    prop = get_property(prop_id)
+    prop = get_property(prop_id, account_id=account_id)
     if not prop:
         return False
     if not is_supabase_primary():
         delete_property_from_supabase(prop)
-    delete_property(prop_id)
+    delete_property(prop_id, account_id=int(prop.get("account_id") or 1))
     logger.info(f"Proprietà eliminata: id={prop_id}")
     return True
 
@@ -141,8 +142,7 @@ def _enforce_property_limit(data: Dict) -> None:
         plan = "free"
     max_properties = int(get_plan_limit(plan, "max_properties", 1))
     current_count = sum(
-        1 for p in get_properties()
-        if int(p.get("account_id") or 1) == account_id
+        1 for p in get_properties(account_id=account_id)
     )
     if current_count >= max_properties:
         raise ValueError(

@@ -45,18 +45,27 @@ class DemoMarketDataProvider:
             competitor_count=competitor_count,
             persist=persist,
             account_id=account_id,
-            source=source,
+            source=self.name,
         )
         return MarketDataResult(
             competitors=result.get("competitors", []),
             market_stats=result.get("market_stats", {}),
-            source=source,
+            source=self.name,
             raw=result,
         )
 
 
 class DemoEventProvider:
     name = "demo_events"
+
+    def event_for_property(
+        self,
+        *,
+        prop: dict,
+        target_date: date,
+        account_id: int = 1,
+    ) -> Optional[dict]:
+        return self.event_for_date(target_date)
 
     def event_for_date(self, target_date: date) -> Optional[dict]:
         from pricepilot.data_sources.events import get_event_for_date

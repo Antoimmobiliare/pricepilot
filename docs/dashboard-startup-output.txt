@@ -1,0 +1,12 @@
+test_full_dashboard_and_navigation_without_external_connections (test_dashboard_startup.DashboardStartupTests.test_full_dashboard_and_navigation_without_external_connections) ... 2026-09-10 14:04:02.500 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ok
+test_public_entry_point_loads_without_credentials (test_dashboard_startup.DashboardStartupTests.test_public_entry_point_loads_without_credentials) ... 2026-09-10 14:04:07.393 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:04:08.207 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 5.715s
+
+OK

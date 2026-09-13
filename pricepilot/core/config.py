@@ -14,7 +14,7 @@ ENV_FILE    = BASE_DIR / ".env"
 
 def _load_dotenv() -> None:
     """Carica le variabili da .env senza dipendenze esterne."""
-    if not ENV_FILE.exists():
+    if os.environ.get("PRICEPILOT_TESTING") == "1" or not ENV_FILE.exists():
         return
     with ENV_FILE.open("r", encoding="utf-8") as f:
         for line in f:
@@ -70,7 +70,7 @@ DEFAULT_CONFIG = {
 
 def load_config() -> dict:
     """Carica configurazione da file JSON, con fallback ai default."""
-    if CONFIG_FILE.exists():
+    if os.environ.get("PRICEPILOT_TESTING") != "1" and CONFIG_FILE.exists():
         try:
             with CONFIG_FILE.open("r", encoding="utf-8") as f:
                 user_cfg = json.load(f)

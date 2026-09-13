@@ -52,7 +52,7 @@ def configured_api_keys() -> Dict[str, int]:
 def production_mode() -> bool:
     env = os.getenv("PRICEPILOT_ENV", "").strip().lower()
     explicit = os.getenv("PRICEPILOT_API_AUTH_REQUIRED", "").strip().lower()
-    return env in {"prod", "production"} or explicit in {"1", "true", "yes", "on"}
+    return env in {"prod", "production", "staging", "live"} or explicit in {"1", "true", "yes", "on"}
 
 
 def api_auth_required() -> bool:

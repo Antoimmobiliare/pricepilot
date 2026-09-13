@@ -155,6 +155,15 @@ class ManualEventProvider:
         priority = {"high": 3, "medium": 2, "low": 1}
         return max(rows, key=lambda row: priority.get(str(row.get("impact_level") or "").lower(), 0))
 
+    def event_for_property(
+        self,
+        *,
+        prop: dict,
+        target_date: date,
+        account_id: int = 1,
+    ) -> Optional[dict]:
+        return self.event_for_date(target_date)
+
     def event_to_string(self, event: Optional[dict]) -> str:
         if not event:
             return "none"

@@ -1,0 +1,17 @@
+{
+  "schema_version": "pricepilot.calendar-policy.v1",
+  "properties": [{
+    "enabled": false,
+    "account_id": null,
+    "property_id": null,
+    "reference_price": 100,
+    "weekend_multiplier": 1,
+    "break_even": 0,
+    "date_reference_prices": {},
+    "lead_time_bands": [
+      {"through_days": 7, "low_occupancy": 0.4, "high_occupancy": 0.8, "low_multiplier": 0.9, "high_multiplier": 1.05},
+      {"through_days": 30, "low_occupancy": 0.3, "high_occupancy": 0.7, "low_multiplier": 0.95, "high_multiplier": 1.05},
+      {"through_days": 366, "low_occupancy": 0.1, "high_occupancy": 0.7, "low_multiplier": 1, "high_multiplier": 1.05}
+    ]
+  }]
+}

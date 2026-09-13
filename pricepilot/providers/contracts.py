@@ -14,6 +14,11 @@ from typing import Optional, Protocol
 
 @dataclass(frozen=True)
 class MarketDataResult:
+    """Normalized market snapshot consumed by the pricing engine.
+
+    Concrete providers can use ``raw`` for vendor-specific payloads, while
+    the engine only relies on competitors, statistics, and a clear source.
+    """
     competitors: list[dict]
     market_stats: dict
     source: str = "demo"
@@ -87,10 +92,22 @@ class MarketDataProvider(Protocol):
 class EventProvider(Protocol):
     """Reads relevant local events for a target date."""
 
+    def event_for_property(
+        self,
+        *,
+        prop: dict,
+        target_date: date,
+        account_id: int = 1,
+    ) -> Optional[dict]:
+        """Return the most relevant event for one property's location."""
+        ...
+
     def event_for_date(self, target_date: date) -> Optional[dict]:
+        """Backward-compatible date-only lookup."""
         ...
 
     def event_to_string(self, event: Optional[dict]) -> str:
+        """Return the normalized event category used by the pricing engine."""
         ...
 
 

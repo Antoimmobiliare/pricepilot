@@ -1,0 +1,200 @@
+test_plan_never_escalates_selected_mode (test_beds24_sync.ClientProtocolTests.test_plan_never_escalates_selected_mode) ... ok
+test_refresh_token_and_pagination_without_following_remote_links (test_beds24_sync.ClientProtocolTests.test_refresh_token_and_pagination_without_following_remote_links) ... ok
+test_cross_account_payload_never_published (test_beds24_sync.PublicationTests.test_cross_account_payload_never_published) ... ok
+test_existing_lock_keeps_snapshot_intact (test_beds24_sync.PublicationTests.test_existing_lock_keeps_snapshot_intact) ... ok
+test_failed_atomic_replace_preserves_previous_snapshot (test_beds24_sync.PublicationTests.test_failed_atomic_replace_preserves_previous_snapshot) ... ok
+test_replace_only_target_property (test_beds24_sync.PublicationTests.test_replace_only_target_property) ... ok
+test_calendar_contradicting_booking_is_rejected (test_beds24_sync.SnapshotTests.test_calendar_contradicting_booking_is_rejected) ... ok
+test_cancelled_booking_does_not_count_as_occupied (test_beds24_sync.SnapshotTests.test_cancelled_booking_does_not_count_as_occupied) ... ok
+test_checkout_is_open_and_block_is_not_booking (test_beds24_sync.SnapshotTests.test_checkout_is_open_and_block_is_not_booking) ... ok
+test_missing_booking_id_is_rejected (test_beds24_sync.SnapshotTests.test_missing_booking_id_is_rejected) ... ok
+test_missing_day_or_wrong_inventory_type_rejected (test_beds24_sync.SnapshotTests.test_missing_day_or_wrong_inventory_type_rejected) ... ok
+test_overbooking_and_duplicate_pages_are_rejected (test_beds24_sync.SnapshotTests.test_overbooking_and_duplicate_pages_are_rejected) ... ok
+test_overlapping_calendar_ranges_rejected (test_beds24_sync.SnapshotTests.test_overlapping_calendar_ranges_rejected) ... ok
+test_sync_keeps_existing_decision_fields_and_manual_lock (test_beds24_sync.SnapshotTests.test_sync_keeps_existing_decision_fields_and_manual_lock) ... ok
+test_unknown_block_or_request_requires_classification (test_beds24_sync.SnapshotTests.test_unknown_block_or_request_requires_classification) ... ok
+test_wrong_tenant_room_is_rejected (test_beds24_sync.SnapshotTests.test_wrong_tenant_room_is_rejected) ... ok
+test_account_profile_update_cannot_change_billing_fields (test_billing_provider.BillingProviderTestCase.test_account_profile_update_cannot_change_billing_fields) ... ok
+test_local_billing_is_not_checkout_configured (test_billing_provider.BillingProviderTestCase.test_local_billing_is_not_checkout_configured) ... ok
+test_local_signup_can_still_use_paid_plans_for_testing (test_billing_provider.BillingProviderTestCase.test_local_signup_can_still_use_paid_plans_for_testing) ... ok
+test_production_signup_does_not_grant_paid_plan_without_checkout (test_billing_provider.BillingProviderTestCase.test_production_signup_does_not_grant_paid_plan_without_checkout) ... ok
+test_stripe_checkout_webhook_activates_paid_plan (test_billing_provider.BillingProviderTestCase.test_stripe_checkout_webhook_activates_paid_plan) ... ok
+test_stripe_provider_creates_checkout_payload_when_configured (test_billing_provider.BillingProviderTestCase.test_stripe_provider_creates_checkout_payload_when_configured) ... ok
+test_stripe_subscription_deleted_downgrades_to_free (test_billing_provider.BillingProviderTestCase.test_stripe_subscription_deleted_downgrades_to_free) ... ok
+test_stripe_webhook_requires_signature_secret_in_production (test_billing_provider.BillingProviderTestCase.test_stripe_webhook_requires_signature_secret_in_production) ... ok
+test_calendar_rules_need_no_market_or_fabricated_adr (test_calendar_pricing.CalendarRuleTests.test_calendar_rules_need_no_market_or_fabricated_adr) ... ok
+test_date_reference_and_explicit_weekend_rule (test_calendar_pricing.CalendarRuleTests.test_date_reference_and_explicit_weekend_rule) ... ok
+test_far_out_empty_calendar_does_not_force_discount (test_calendar_pricing.CalendarRuleTests.test_far_out_empty_calendar_does_not_force_discount) ... ok
+test_missing_or_cross_account_policy_is_rejected (test_calendar_pricing.CalendarRuleTests.test_missing_or_cross_account_policy_is_rejected) ... ok
+test_repeated_cycle_after_approval_does_not_compound_discount (test_calendar_pricing.CalendarRuleTests.test_repeated_cycle_after_approval_does_not_compound_discount) ... ok
+test_new_bookings_change_recommendation_before_approval (test_calendar_pricing.CalendarWorkflowTests.test_new_bookings_change_recommendation_before_approval) ... ok
+test_policy_changed_after_message_blocks_approval (test_calendar_pricing.CalendarWorkflowTests.test_policy_changed_after_message_blocks_approval) ... ok
+test_proposal_and_approval_work_without_any_competitor_data (test_calendar_pricing.CalendarWorkflowTests.test_proposal_and_approval_work_without_any_competitor_data) ... ok
+test_readiness_does_not_require_external_market_source (test_calendar_pricing.CalendarWorkflowTests.test_readiness_does_not_require_external_market_source) ... ok
+test_telegram_message_has_no_fictitious_market_price (test_calendar_pricing.CalendarWorkflowTests.test_telegram_message_has_no_fictitious_market_price) ... ok
+test_unchanged_price_sends_no_approval_message (test_calendar_pricing.CalendarWorkflowTests.test_unchanged_price_sends_no_approval_message) ... ok
+test_unknown_inventory_blocks_without_querying_market (test_calendar_pricing.CalendarWorkflowTests.test_unknown_inventory_blocks_without_querying_market) ... ok
+test_cloud_sessions_always_use_server_client (test_cloud_primary.CloudBackendTests.test_cloud_sessions_always_use_server_client) ... ok
+test_cutover_schema_contains_cloud_primary_contract (test_cloud_primary.CloudBackendTests.test_cutover_schema_contains_cloud_primary_contract) ... ok
+test_dashboard_rejects_unscoped_cloud_query_without_account (test_cloud_primary.CloudBackendTests.test_dashboard_rejects_unscoped_cloud_query_without_account) ... ok
+test_dashboard_scopes_cloud_query_to_current_account (test_cloud_primary.CloudBackendTests.test_dashboard_scopes_cloud_query_to_current_account) ... ok
+test_unknown_backend_is_rejected (test_cloud_primary.CloudBackendTests.test_unknown_backend_is_rejected) ... ok
+test_full_dashboard_and_navigation_without_external_connections (test_dashboard_startup.DashboardStartupTests.test_full_dashboard_and_navigation_without_external_connections) ... 2026-09-10 14:06:11.895 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ok
+test_public_entry_point_loads_without_credentials (test_dashboard_startup.DashboardStartupTests.test_public_entry_point_loads_without_credentials) ... 2026-09-10 14:06:16.496 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:06:17.121 WARNING streamlit.deprecation_util: Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+ok
+test_italian_national_holiday_needs_no_external_api (test_free_event_provider.FreeEventProviderTestCase.test_italian_national_holiday_needs_no_external_api) ... ok
+test_ticketmaster_events_are_location_aware_and_cached (test_free_event_provider.FreeEventProviderTestCase.test_ticketmaster_events_are_location_aware_and_cached) ... ok
+test_manual_event_and_occupancy_providers_read_csv (test_manual_data_provider.ManualDataProviderTestCase.test_manual_event_and_occupancy_providers_read_csv) ... ok
+test_manual_market_provider_reads_csv_and_builds_stats (test_manual_data_provider.ManualDataProviderTestCase.test_manual_market_provider_reads_csv_and_builds_stats) ... ok
+test_registry_switches_to_manual_provider_from_env (test_manual_data_provider.ManualDataProviderTestCase.test_registry_switches_to_manual_provider_from_env) ... ok
+test_all_unconfigured_views_render_without_fabricated_metrics (test_operational_views.OperationalViewTests.test_all_unconfigured_views_render_without_fabricated_metrics) ... 2026-09-10 14:06:17.140 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:06:17.305 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:06:17.472 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:06:17.630 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ok
+test_calendar_pricing_view_does_not_require_competitor_provider (test_operational_views.OperationalViewTests.test_calendar_pricing_view_does_not_require_competitor_provider) ... 2026-09-10 14:06:17.784 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ok
+test_recorded_rates_remain_separate_from_recommendation (test_operational_views.OperationalViewTests.test_recorded_rates_remain_separate_from_recommendation) ... 2026-09-10 14:06:17.940 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-10 14:06:18.091 WARNING streamlit.deprecation_util: Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+ok
+test_get_pricing_never_creates_decisions (test_prelaunch.ApiBindingTests.test_get_pricing_never_creates_decisions) ... C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+ok
+test_telegram_http_request_binds_body (test_prelaunch.ApiBindingTests.test_telegram_http_request_binds_body) ... ok
+test_changed_current_price_blocks_approval (test_prelaunch.ApprovalIntegrityTests.test_changed_current_price_blocks_approval) ... ok
+test_new_manual_lock_blocks_approval (test_prelaunch.ApprovalIntegrityTests.test_new_manual_lock_blocks_approval) ... ok
+test_only_one_database_claim_wins (test_prelaunch.ApprovalIntegrityTests.test_only_one_database_claim_wins) ... ok
+test_rejected_decision_never_sends (test_prelaunch.ApprovalIntegrityTests.test_rejected_decision_never_sends) ... ok
+test_repeated_approval_sends_once (test_prelaunch.ApprovalIntegrityTests.test_repeated_approval_sends_once) ... ok
+test_blocked_day_never_writes (test_prelaunch.Beds24Tests.test_blocked_day_never_writes) ... ok
+test_default_write_gate (test_prelaunch.Beds24Tests.test_default_write_gate) ... ok
+test_no_credentials_no_network (test_prelaunch.Beds24Tests.test_no_credentials_no_network) ... ok
+test_rate_limit_is_explicit (test_prelaunch.Beds24Tests.test_rate_limit_is_explicit) ... ok
+test_readback_mismatch_is_not_success (test_prelaunch.Beds24Tests.test_readback_mismatch_is_not_success) ... ok
+test_remote_errors_do_not_expose_response_secrets (test_prelaunch.Beds24Tests.test_remote_errors_do_not_expose_response_secrets) ... ok
+test_update_changes_only_price_and_reads_back (test_prelaunch.Beds24Tests.test_update_changes_only_price_and_reads_back) ... ok
+test_wrong_property_response_is_rejected (test_prelaunch.Beds24Tests.test_wrong_property_response_is_rejected) ... ok
+test_cleaning_not_used_as_nightly_room_price (test_prelaunch.ObservationTests.test_cleaning_not_used_as_nightly_room_price) ... ok
+test_fully_blocked_inventory_has_no_occupancy (test_prelaunch.ObservationTests.test_fully_blocked_inventory_has_no_occupancy) ... ok
+test_inconsistent_total_not_used (test_prelaunch.ObservationTests.test_inconsistent_total_not_used) ... ok
+test_missing_inventory_is_not_open (test_prelaunch.ObservationTests.test_missing_inventory_is_not_open) ... ok
+test_multi_night_quote_never_becomes_single_night (test_prelaunch.ObservationTests.test_multi_night_quote_never_becomes_single_night) ... ok
+test_occupancy_excludes_owner_and_maintenance_blocks (test_prelaunch.ObservationTests.test_occupancy_excludes_owner_and_maintenance_blocks) ... ok
+test_scoped_data_cannot_leak (test_prelaunch.ObservationTests.test_scoped_data_cannot_leak) ... ok
+test_stale_quote_not_used (test_prelaunch.ObservationTests.test_stale_quote_not_used) ... ok
+test_unavailable_supersedes_previous_quote_without_becoming_booked (test_prelaunch.ObservationTests.test_unavailable_supersedes_previous_quote_without_becoming_booked) ... ok
+test_all_constraints_hold_over_many_inputs (test_prelaunch.PricingSafetyTests.test_all_constraints_hold_over_many_inputs) ... ok
+test_break_even_above_ceiling_is_rejected (test_prelaunch.PricingSafetyTests.test_break_even_above_ceiling_is_rejected) ... ok
+test_floor_cannot_override_max_change (test_prelaunch.PricingSafetyTests.test_floor_cannot_override_max_change) ... ok
+test_nan_is_rejected (test_prelaunch.PricingSafetyTests.test_nan_is_rejected) ... ok
+test_production_cannot_enable_demo (test_prelaunch.PricingSafetyTests.test_production_cannot_enable_demo) ... ok
+test_strategy_changes_the_real_engine (test_prelaunch.PricingSafetyTests.test_strategy_changes_the_real_engine) ... ok
+test_zero_occupancy_is_known_data (test_prelaunch.PricingSafetyTests.test_zero_occupancy_is_known_data) ... ok
+test_booked_dates_are_skipped (test_prelaunch.SchedulerHorizonTests.test_booked_dates_are_skipped) ... ok
+test_cloud_reports_child_failure (test_prelaunch.SchedulerHorizonTests.test_cloud_reports_child_failure) ... ok
+test_every_future_day_is_analyzed (test_prelaunch.SchedulerHorizonTests.test_every_future_day_is_analyzed) ... ok
+test_partial_errors_carry_target_date (test_prelaunch.SchedulerHorizonTests.test_partial_errors_carry_target_date) ... Errore ciclo property_id=1: No observation
+Traceback (most recent call last):
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\pricepilot\core\scheduler.py", line 197, in run_pricing_cycle
+    result = process_decision(
+             ^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1204, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\tests\test_prelaunch.py", line 213, in decision
+    if fail: raise DataUnavailable('No observation')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pricepilot.core.data_quality.DataUnavailable: No observation
+Errore ciclo property_id=1: No observation
+Traceback (most recent call last):
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\pricepilot\core\scheduler.py", line 197, in run_pricing_cycle
+    result = process_decision(
+             ^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1204, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\tests\test_prelaunch.py", line 213, in decision
+    if fail: raise DataUnavailable('No observation')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pricepilot.core.data_quality.DataUnavailable: No observation
+Errore ciclo property_id=1: No observation
+Traceback (most recent call last):
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\pricepilot\core\scheduler.py", line 197, in run_pricing_cycle
+    result = process_decision(
+             ^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\unittest\mock.py", line 1204, in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\UTENTE\OneDrive\Desktop\progetto Anto\PricePilot Prelaunch\tests\test_prelaunch.py", line 213, in decision
+    if fail: raise DataUnavailable('No observation')
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pricepilot.core.data_quality.DataUnavailable: No observation
+ok
+test_account_isolation_for_properties_decisions_and_approval (test_saas_basics.PricePilotSaaSTestCase.test_account_isolation_for_properties_decisions_and_approval) ... Decisione 1 non trovata.
+ok
+test_cloud_scheduler_runs_once_for_each_account_with_properties (test_saas_basics.PricePilotSaaSTestCase.test_cloud_scheduler_runs_once_for_each_account_with_properties) ... ok
+test_free_decision_is_advisory_only (test_saas_basics.PricePilotSaaSTestCase.test_free_decision_is_advisory_only) ... ok
+test_locked_calendar_price_is_not_changed_by_pricing_cycle (test_saas_basics.PricePilotSaaSTestCase.test_locked_calendar_price_is_not_changed_by_pricing_cycle) ... ok
+test_plan_limits_and_allowed_modes (test_saas_basics.PricePilotSaaSTestCase.test_plan_limits_and_allowed_modes) ... ok
+test_plus_decision_waits_for_approval (test_saas_basics.PricePilotSaaSTestCase.test_plus_decision_waits_for_approval) ... ok
+test_pro_auto_applies_only_when_guardrails_allow_it (test_saas_basics.PricePilotSaaSTestCase.test_pro_auto_applies_only_when_guardrails_allow_it) ... ok
+test_pro_requires_real_market_data_before_autopilot (test_saas_basics.PricePilotSaaSTestCase.test_pro_requires_real_market_data_before_autopilot) ... ok
+test_scheduler_resolves_events_for_the_specific_property (test_saas_basics.PricePilotSaaSTestCase.test_scheduler_resolves_events_for_the_specific_property) ... ok
+test_signup_selected_plan_is_saved_on_account (test_saas_basics.PricePilotSaaSTestCase.test_signup_selected_plan_is_saved_on_account) ... ok
+test_telegram_approval_with_real_channel_manager_applies_price (test_saas_basics.PricePilotSaaSTestCase.test_telegram_approval_with_real_channel_manager_applies_price) ... ok
+test_telegram_approval_without_channel_manager_stays_pending_manual_sync (test_saas_basics.PricePilotSaaSTestCase.test_telegram_approval_without_channel_manager_stays_pending_manual_sync) ... ok
+test_api_auth_is_fail_closed_in_production_without_keys (test_security_basics.SecurityBasicsTestCase.test_api_auth_is_fail_closed_in_production_without_keys) ... ok
+test_api_auth_is_open_only_in_local_dev_without_keys (test_security_basics.SecurityBasicsTestCase.test_api_auth_is_open_only_in_local_dev_without_keys) ... ok
+test_api_keys_resolve_account_server_side (test_security_basics.SecurityBasicsTestCase.test_api_keys_resolve_account_server_side) ... ok
+test_api_private_routes_block_without_key_in_production (test_security_basics.SecurityBasicsTestCase.test_api_private_routes_block_without_key_in_production) ... ok
+test_api_readiness_is_public_but_reports_missing_production_config (test_security_basics.SecurityBasicsTestCase.test_api_readiness_is_public_but_reports_missing_production_config) ... ok
+test_cloud_scheduler_endpoint_requires_its_own_secret (test_security_basics.SecurityBasicsTestCase.test_cloud_scheduler_endpoint_requires_its_own_secret) ... ok
+test_dashboard_auth_fallback_is_closed_in_production (test_security_basics.SecurityBasicsTestCase.test_dashboard_auth_fallback_is_closed_in_production) ... ok
+test_public_legal_documents_are_versioned_and_accessible (test_security_basics.SecurityBasicsTestCase.test_public_legal_documents_are_versioned_and_accessible) ... ok
+test_scheduler_key_is_separate_from_tenant_api_keys (test_security_basics.SecurityBasicsTestCase.test_scheduler_key_is_separate_from_tenant_api_keys) ... ok
+test_supabase_account_sync_requires_auth_or_service_role_context (test_security_basics.SecurityBasicsTestCase.test_supabase_account_sync_requires_auth_or_service_role_context) ... ok
+test_supabase_auth_redirect_urls_have_clear_precedence (test_security_basics.SecurityBasicsTestCase.test_supabase_auth_redirect_urls_have_clear_precedence) ... ok
+test_supabase_migration_dry_run_counts_account_data (test_security_basics.SecurityBasicsTestCase.test_supabase_migration_dry_run_counts_account_data) ... ok
+test_supabase_migration_requires_write_context (test_security_basics.SecurityBasicsTestCase.test_supabase_migration_requires_write_context) ... ok
+test_supabase_schema_uses_authenticated_rls (test_security_basics.SecurityBasicsTestCase.test_supabase_schema_uses_authenticated_rls) ... ok
+test_telegram_callback_can_only_approve_linked_property_chat (test_security_basics.SecurityBasicsTestCase.test_telegram_callback_can_only_approve_linked_property_chat) ... ok
+test_telegram_webhook_auto_registration_is_explicit_and_uses_api_url (test_security_basics.SecurityBasicsTestCase.test_telegram_webhook_auto_registration_is_explicit_and_uses_api_url) ... ok
+test_telegram_webhook_requires_secret_in_production (test_security_basics.SecurityBasicsTestCase.test_telegram_webhook_requires_secret_in_production) ... ok
+test_telegram_webhook_secret_rules (test_security_basics.SecurityBasicsTestCase.test_telegram_webhook_secret_rules) ... ok
+test_user_consent_is_recorded_locally (test_security_basics.SecurityBasicsTestCase.test_user_consent_is_recorded_locally) ... ok
+test_channel_manager_recognizes_smoobu_as_supported (test_smoobu_adapter.SmoobuAdapterTests.test_channel_manager_recognizes_smoobu_as_supported) ... ok
+test_hmac_auth_uses_current_smoobu_headers (test_smoobu_adapter.SmoobuAdapterTests.test_hmac_auth_uses_current_smoobu_headers) ... ok
+test_stub_update_is_safe_without_credentials (test_smoobu_adapter.SmoobuAdapterTests.test_stub_update_is_safe_without_credentials) ... ok
+test_update_price_builds_smoobu_rates_payload_without_network (test_smoobu_adapter.SmoobuAdapterTests.test_update_price_builds_smoobu_rates_payload_without_network) ... ok
+
+----------------------------------------------------------------------
+Ran 121 tests in 18.016s
+
+OK
+Telegram webhook registrato: https://api.example.test/telegram/webhook

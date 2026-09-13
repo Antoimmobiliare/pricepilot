@@ -1,0 +1,16 @@
+{
+  "connections": [
+    {
+      "provider": "beds24",
+      "enabled": false,
+      "account_id": null,
+      "property_id": null,
+      "beds24_property_id": null,
+      "room_id": null,
+      "price_slot": 1,
+      "currency": "EUR",
+      "token_env": "BEDS24_LUMA_TOKEN",
+      "refresh_token_env": "BEDS24_LUMA_REFRESH_TOKEN"
+    }
+  ]
+}

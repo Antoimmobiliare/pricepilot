@@ -6605,8 +6605,8 @@ def tab_telegram():
     # ── Descrizione funzione ──────────────────────────────────────────────────
     st.markdown(
         "**⚡ Ricevi consigli di pricing senza aprire la dashboard.** "
-        "PricePilot usa il piano attivo per decidere cosa inviare: consigli nel Free, "
-        "richieste di approvazione nel Plus e report operativi nel Pro."
+        "PricePilot analizza calendario e regole del tuo appartamento. "
+        "Controlla la proposta, valuta eventualmente i competitor e approva solo quando vuoi intervenire."
     )
 
     col_desc, col_preview = st.columns([1, 1], gap="large")
@@ -6615,20 +6615,20 @@ def tab_telegram():
         st.markdown("##### Perché usarlo")
         st.markdown("""
         - **💡 Ricevi consigli motivati** → prezzo attuale, prezzo suggerito e motivo
-        - **🔥 Non perdere mai momenti ad alta domanda** → weekend, eventi, festività
-        - **📈 Resta competitivo** → confronti con mercato e competitor simili
-        - **💰 Ogni notifica è un'opportunità di ricavo** → agisci subito sulle tue OTA
+        - **📅 Controlla le date libere** → anticipo, occupazione e regole che hai impostato
+        - **🔎 Valuta il mercato quando serve** → confronto competitor a tua cura
+        - **✅ Mantieni il controllo** → nessuna modifica senza approvazione
         """)
         st.markdown("##### Come si usa")
         st.markdown("""
         1. **Collega Telegram** → clicca il bottone qui sotto
-        2. **PricePilot legge il tuo piano attivo** → Free, Plus o Pro
-        3. **Ricevi l'alert corretto** → consiglio, approvazione o report operativo
-        4. **Agisci solo quando serve** → manuale nel Free, approvazione nel Plus, automatico nel Pro
+        2. **Configura le regole** → tariffa di riferimento, limiti e finestre di anticipo
+        3. **Ricevi la proposta motivata** → data, prezzo corrente e suggerimento
+        4. **Approva o rifiuta** → PP verifica nuovamente i dati prima dell'invio al channel manager
         """)
 
     with col_preview:
-        st.markdown("##### Esempio di messaggio Telegram")
+        st.markdown("##### Esempio illustrativo di messaggio Telegram")
         st.markdown(
             """
             <div class="tg-preview">
@@ -6647,12 +6647,12 @@ def tab_telegram():
                     <span class="tg-preview-value">€ 95 &nbsp;<span style="color:#2ecc71;font-size:0.82rem">(+18.8%)</span></span>
                 </div>
                 <div class="tg-preview-row">
-                    <span class="tg-preview-label">📊 Media mercato</span>
-                    <span class="tg-preview-value">€ 88</span>
+                    <span class="tg-preview-label">📊 Fonte</span>
+                    <span class="tg-preview-value">Calendario dell'appartamento</span>
                 </div>
                 <div class="tg-preview-row">
                     <span class="tg-preview-label">📅 Motivo</span>
-                    <span class="tg-preview-value">Weekend + Alta domanda</span>
+                    <span class="tg-preview-value">Regola weekend impostata</span>
                 </div>
                 <hr class="tg-preview-divider">
                 <div class="tg-preview-question">Test collegamento: verifica che PricePilot possa inviarti messaggi Telegram.</div>
@@ -6686,6 +6686,9 @@ def tab_telegram():
 
         is_connected = bool(link and link.get("chat_id") and link.get("active"))
         mode         = effective_sync_mode(get_effective_plan_for_property(prop), prop.get("sync_mode", "advisory"))
+        from pricepilot.core.data_quality import calendar_pricing_enabled
+        if calendar_pricing_enabled() and mode == "auto":
+            mode = "approval"
         mode_labels  = {"advisory": "💡 Manuale", "approval": "✅ Approvazione", "auto": "🤖 Automatico"}
 
         # ── Card container ────────────────────────────────────────────────────
@@ -6728,12 +6731,10 @@ def tab_telegram():
                 if st.button("Test collegamento", key=f"tg_test_{prop_id}", use_container_width=True):
                     try:
                         with st.spinner("Invio test Telegram..."):
-                            process_decision(
-                                property_id=prop_id,
-                                occupancy=0.65,
-                                target_date=date.today(),
-                                force_mode="advisory",
-                            )
+                            from pricepilot.services.telegram_bot import send_message
+                            response = send_message(link['chat_id'], 'PricePilot: test del collegamento riuscito. Questo messaggio non contiene una proposta e non modifica prezzi.')
+                            if not response.get('ok'):
+                                raise ValueError('Telegram non ha confermato la consegna.')
                         st.toast("Test Telegram inviato.", icon="✅")
                     except Exception as exc:
                         st.error(f"Errore invio test: {exc}")
@@ -7370,12 +7371,18 @@ def tab_auto_log():
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
+    from pricepilot.core.data_quality import demo_enabled
     if not require_auth():
         return
 
     reset_account_scoped_state_if_needed()
-    cfg = render_sidebar()
     account_id = current_account_id()
+    if demo_enabled():
+        cfg = render_sidebar()
+    else:
+        from pricepilot.dashboard.setup import render_sidebar as render_owner_sidebar
+        render_owner_sidebar(account_id)
+        cfg = load_config()
 
     # ── Header ────────────────────────────────────────────────────────────────
     active_prop_id   = st.session_state.get("active_prop_id")
@@ -7392,7 +7399,7 @@ def main():
 
     subtitle = (
         f"Dynamic Pricing · <span style='color:#6366f1;font-weight:600'>"
-        f"{active_prop_name}</span>"
+        f"{_html.escape(active_prop_name)}</span>"
         if active_prop_name
         else "Dynamic Pricing per Affitti Brevi"
     )
@@ -7408,7 +7415,7 @@ def main():
     try:
         stats = _cached_summary_stats_for_account(account_id)
         props_count = len(_cached_properties_for_account(account_id))
-        if stats["total_decisions"] > 0 or props_count > 0:
+        if demo_enabled() and (stats["total_decisions"] > 0 or props_count > 0):
             _avg_p  = stats.get("avg_price", 0) or 0
             _chg    = stats.get("avg_change_pct", 0) or 0
 
@@ -7533,7 +7540,7 @@ def main():
         ("decisions", "\U0001f4cb Decisioni"),
         ("telegram", "\U0001f514 Telegram"),
         ("integrations", "\U0001f50c Integrazioni"),
-        ("auto_apply", "\U0001f916 Auto Apply"),
+        ("auto_apply", "\U0001f916 Registro aggiornamenti"),
     ]
     nav_labels = [label for _, label in nav_items]
     nav_label_to_key = {label: key for key, label in nav_items}
@@ -7562,7 +7569,19 @@ def main():
         "integrations": tab_integrations,
         "auto_apply": tab_auto_log,
     }
-    renderers[selected_key]()
+    if not demo_enabled() and selected_key == "properties":
+        from pricepilot.dashboard.setup import render_properties
+        render_properties(account_id, active_prop_id)
+    elif not demo_enabled() and selected_key == "integrations":
+        from pricepilot.dashboard.setup import render_integrations
+        render_integrations(account_id, active_prop_id)
+    elif not demo_enabled() and selected_key in {"home", "pricing", "calendar", "analytics"}:
+        from pricepilot.dashboard.operational import render
+        render(account_id, selected_key, active_prop_id)
+    else:
+        if demo_enabled():
+            st.warning("MODALITA DEMO: i dati simulati non rappresentano il mercato o i ricavi reali.")
+        renderers[selected_key]()
 
 
 if __name__ == "__main__":

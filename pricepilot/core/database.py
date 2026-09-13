@@ -1584,21 +1584,37 @@ def upsert_property(prop: Dict) -> int:
             return cur.lastrowid
 
 
-def get_properties() -> List[Dict]:
+def get_properties(account_id: Optional[int] = None) -> List[Dict]:
+    query = "SELECT * FROM properties"
+    params: list[Any] = []
+    if account_id is not None:
+        query += " WHERE account_id=?"
+        params.append(int(account_id))
+    query += " ORDER BY id"
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM properties ORDER BY id").fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_property(prop_id: int) -> Optional[Dict]:
+def get_property(prop_id: int, account_id: Optional[int] = None) -> Optional[Dict]:
+    query = "SELECT * FROM properties WHERE id=?"
+    params: list[Any] = [int(prop_id)]
+    if account_id is not None:
+        query += " AND account_id=?"
+        params.append(int(account_id))
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM properties WHERE id=?", (prop_id,)).fetchone()
+        row = conn.execute(query, params).fetchone()
     return dict(row) if row else None
 
 
-def delete_property(prop_id: int) -> None:
+def delete_property(prop_id: int, account_id: Optional[int] = None) -> None:
+    query = "DELETE FROM properties WHERE id=?"
+    params: list[Any] = [int(prop_id)]
+    if account_id is not None:
+        query += " AND account_id=?"
+        params.append(int(account_id))
     with get_conn() as conn:
-        conn.execute("DELETE FROM properties WHERE id=?", (prop_id,))
+        conn.execute(query, params)
 
 
 # ─────────────────────────────────────────────
@@ -2160,6 +2176,16 @@ def get_decision_log_entry(log_id: int, account_id: Optional[int] = None) -> Opt
     return dict(row) if row else None
 
 
+def claim_decision_application(log_id: int, account_id: int, expected: str) -> bool:
+    """Compare-and-swap claim committed BEFORE the external side effect."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE decision_log SET decision=? WHERE id=? AND account_id=? AND applied=0 AND decision=?",
+            (expected + " [APPLYING]", log_id, account_id, expected),
+        )
+        return cur.rowcount == 1
+
+
 def update_decision_state(
     log_id: int,
     *,
@@ -2176,18 +2202,24 @@ def update_decision_state(
 
 
 def mark_decision_rejected(log_id: int, account_id: int) -> Optional[Dict]:
-    row = get_decision_log_entry(log_id, account_id)
-    if not row:
-        return None
-    decision = str(row.get("decision") or "")
-    if "[REJECTED]" not in decision:
-        decision = f"{decision} [REJECTED]".strip()
-    return update_decision_state(
-        log_id,
-        account_id=int(account_id),
-        applied=False,
-        decision=decision,
-    )
+    """Reject only the exact still-pending decision (CAS against approval races)."""
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT decision, applied FROM decision_log WHERE id=? AND account_id=?",
+            (int(log_id), int(account_id)),
+        ).fetchone()
+        if not row or row["applied"] or not str(row["decision"] or "").startswith("PENDING_APPROVAL"):
+            return None
+        expected = str(row["decision"])
+        if any(tag in expected for tag in ("[APPLYING]", "[REJECTED]", "[APPROVED_")):
+            return None
+        rejected = f"{expected} [REJECTED]"
+        changed = conn.execute(
+            "UPDATE decision_log SET decision=? WHERE id=? AND account_id=? AND applied=0 AND decision=?",
+            (rejected, int(log_id), int(account_id), expected),
+        ).rowcount
+    return get_decision_log_entry(log_id, account_id) if changed == 1 else None
 
 
 def get_telegram_decision_context(log_id: int, chat_id: int) -> Optional[Dict]:
@@ -2299,7 +2331,7 @@ _CLOUD_PRIMARY_OPERATIONS = (
     "ensure_default_notification_preferences", "get_notification_preferences",
     "update_notification_preferences", "record_notification_log", "get_notification_log",
     "upsert_property", "get_properties", "get_property", "delete_property",
-    "save_decision_log", "get_decision_log", "get_decision_log_entry", "update_decision_state",
+    "save_decision_log", "get_decision_log", "get_decision_log_entry", "update_decision_state", "claim_decision_application",
     "mark_decision_rejected", "save_occupancy", "get_occupancy_history", "save_market_history",
     "get_market_history", "get_calendar_price", "get_price_calendar", "upsert_calendar_price",
     "get_current_price_for_date", "save_price_recommendation", "update_calendar_status_for_decision",

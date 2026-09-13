@@ -10,7 +10,7 @@ Documentazione interattiva: http://localhost:8000/docs
 """
 import os
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 # Il processo API puo gestire task multi-account in modo server-side. La
 # dashboard Streamlit, invece, resta vincolata al singolo account autenticato.
@@ -32,7 +32,7 @@ from pricepilot.core.database import (
     get_notification_preferences, update_notification_preferences,
     get_notification_log,
     get_price_calendar, upsert_calendar_price,
-    get_telegram_approvals,
+    get_telegram_approvals, mark_decision_rejected,
 )
 from pricepilot.core.supabase_client import is_supabase_configured
 from pricepilot.services.property_service import (
@@ -159,12 +159,15 @@ def _api_base_url() -> str:
 
 
 def _deployment_readiness_checks() -> dict:
+    from pricepilot.core.data_quality import calendar_pricing_enabled
+    from types import SimpleNamespace
+    own_calendar = calendar_pricing_enabled()
     prod = production_mode()
     api_keys = configured_api_keys()
     api_base_url = _api_base_url()
     billing_provider = get_billing_provider()
-    market_provider = get_market_data_provider()
-    event_provider = get_event_provider()
+    market_provider = SimpleNamespace(name="not_used_calendar_only") if own_calendar else get_market_data_provider()
+    event_provider = SimpleNamespace(name="owner_rules_only") if own_calendar else get_event_provider()
     occupancy_provider = get_occupancy_provider()
     provider_names = {
         "market": getattr(market_provider, "name", type(market_provider).__name__),
@@ -172,6 +175,8 @@ def _deployment_readiness_checks() -> dict:
         "occupancy": getattr(occupancy_provider, "name", type(occupancy_provider).__name__),
     }
     demo_data = any(str(name).startswith("demo") for name in provider_names.values())
+    market_not_configured = not own_calendar and provider_names["market"] == "competitor_provider_unconfigured"
+    inventory_missing = "unconfigured" in provider_names["occupancy"]
     return {
         "api_base_url": {
             "ok": bool(api_base_url) or not prod,
@@ -208,12 +213,16 @@ def _deployment_readiness_checks() -> dict:
             ),
         },
         "data_providers": {
-            "ok": (not demo_data) or not prod,
+            "ok": (not demo_data and not market_not_configured and not inventory_missing) or not prod,
             "required": prod,
             "detail": (
                 f"Provider dati: {provider_names}"
-                if not demo_data
-                else "Provider dati demo attivi: usa PRICEPILOT_DATA_PROVIDER=manual o API reali"
+                if not demo_data and not market_not_configured and not inventory_missing
+                else (
+                    "Provider competitor demo non configurato"
+                    if market_not_configured
+                    else "Collegare calendario e prenotazioni reali; dati mancanti o demo"
+                )
             ),
         },
     }
@@ -308,6 +317,37 @@ class CalendarPriceUpsert(BaseModel):
     recommended_price: Optional[float] = None
     status: str = Field("current", example="current")
     notes: str = ""
+
+
+class LeadTimeBand(BaseModel):
+    through_days: int = Field(..., ge=0, le=366)
+    low_occupancy: float = Field(..., ge=0, le=1)
+    high_occupancy: float = Field(..., ge=0, le=1)
+    low_multiplier: float = Field(..., ge=.5, le=1)
+    high_multiplier: float = Field(..., ge=1, le=2)
+
+
+class CalendarPolicyUpdate(BaseModel):
+    enabled: bool = False
+    reference_price: float = Field(..., gt=0, le=100000)
+    weekend_multiplier: float = Field(1, ge=.5, le=2)
+    break_even: float = Field(0, ge=0, le=100000)
+    date_reference_prices: dict[str, float] = Field(default_factory=dict)
+    lead_time_bands: list[LeadTimeBand]
+    pacing_rule: dict = Field(default_factory=dict)
+    minimum_stay_rule: dict = Field(default_factory=dict)
+
+
+class Beds24ConnectionUpdate(BaseModel):
+    provider: Literal["beds24"] = "beds24"
+    enabled: bool = False
+    beds24_property_id: Optional[int] = Field(None, ge=1)
+    room_id: Optional[int] = Field(None, ge=1)
+    price_slot: Optional[int] = Field(None, ge=1, le=16)
+    currency: Literal["EUR"] = "EUR"
+    token_env: str = ""
+    refresh_token_env: str = ""
+    price_basis: Literal["unknown", "accommodation_only"] = "unknown"
 
 
 # ─── Routes: Account ────────────────────────────────────────────────────────
@@ -432,9 +472,10 @@ def api_update_property(prop_id: int, body: PropertyUpdate, request: Request):
 
 @app.delete("/properties/{prop_id}", tags=["Properties"], summary="Elimina proprietà")
 def api_delete_property(prop_id: int, request: Request):
-    if not get_property_by_id(prop_id, account_id=_account_id(request)):
+    account_id = _account_id(request)
+    if not get_property_by_id(prop_id, account_id=account_id):
         raise HTTPException(404, f"Property {prop_id} not found")
-    if not remove_property(prop_id):
+    if not remove_property(prop_id, account_id=account_id):
         raise HTTPException(404, f"Property {prop_id} not found")
     return {"deleted": prop_id}
 
@@ -453,6 +494,7 @@ def api_pricing(body: PricingRequest, request: Request):
             raise HTTPException(404, f"Property {body.property_id} not found")
         target = date.fromisoformat(body.target_date) if body.target_date else date.today()
         result = process_decision(
+            account_id       = account_id,
             property_id      = body.property_id,
             occupancy        = body.occupancy,
             target_date      = target,
@@ -468,8 +510,8 @@ def api_pricing(body: PricingRequest, request: Request):
         raise HTTPException(422, str(e))
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    except Exception:
+        raise HTTPException(500, "Errore interno durante il calcolo del prezzo.") from None
 
 
 @app.get("/pricing", tags=["Pricing"], summary="Pricing rapido via query params")
@@ -480,18 +522,7 @@ def api_pricing_get(
     event:       str   = Query(""),
     data_source: str   = Query("api_manual"),
 ):
-    try:
-        if not get_property_by_id(property_id, account_id=_account_id(request)):
-            raise HTTPException(404, f"Property {property_id} not found")
-        return process_decision(
-            property_id=property_id,
-            occupancy=occupancy,
-            event=event,
-            data_source=data_source,
-            occupancy_source=data_source,
-        )
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    raise HTTPException(405, "GET non esegue pricing: usare POST /pricing per creare una decisione.")
 
 
 # ─── Routes: Decisions ────────────────────────────────────────────────────────
@@ -537,6 +568,65 @@ def api_upsert_calendar_price(body: CalendarPriceUpsert, request: Request):
     })
 
 
+@app.get("/properties/{property_id}/calendar-policy", tags=["Operations"], summary="Regole calendario")
+def api_get_calendar_policy(property_id: int, request: Request):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Appartamento non trovato.")
+    from pricepilot.services.operational_store import get_calendar_policy
+    return get_calendar_policy(account_id, property_id)
+
+
+@app.put("/properties/{property_id}/calendar-policy", tags=["Operations"], summary="Salva regole calendario")
+def api_save_calendar_policy(property_id: int, body: CalendarPolicyUpdate, request: Request):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Appartamento non trovato.")
+    from pricepilot.services.operational_store import save_calendar_policy
+    try:
+        return save_calendar_policy(account_id, property_id, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@app.get("/properties/{property_id}/channel-connection", tags=["Operations"], summary="Mapping channel manager")
+def api_get_channel_connection(property_id: int, request: Request):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Appartamento non trovato.")
+    from pricepilot.services.operational_store import get_connection
+    connection = get_connection(account_id, property_id)
+    if not connection:
+        return None
+    # Only report whether referenced secrets exist; values never leave the server.
+    return {**connection,
+        "token_configured": bool(connection.get("token_env") and os.getenv(connection["token_env"])),
+        "refresh_token_configured": bool(connection.get("refresh_token_env") and os.getenv(connection["refresh_token_env"]))}
+
+
+@app.put("/properties/{property_id}/channel-connection", tags=["Operations"], summary="Salva mapping channel manager")
+def api_save_channel_connection(property_id: int, body: Beds24ConnectionUpdate, request: Request):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Appartamento non trovato.")
+    from pricepilot.services.operational_store import save_connection
+    try:
+        return save_connection(account_id, property_id, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
+@app.get("/properties/{property_id}/performance", tags=["Analytics"], summary="KPI prenotazioni verificati")
+def api_property_performance(property_id: int, request: Request, date_from: date, date_to: date):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Appartamento non trovato.")
+    if date_to <= date_from or (date_to-date_from).days > 366:
+        raise HTTPException(422, "Intervallo non valido: massimo 366 giorni, fine esclusiva.")
+    from pricepilot.services.operational_store import get_reservation_metrics
+    return get_reservation_metrics(account_id, property_id, date_from, date_to)
+
+
 @app.get("/decisions", tags=["Decisions"], summary="Log decisioni")
 def api_decisions(
     request: Request,
@@ -557,6 +647,14 @@ def api_approve(body: ApprovalRequest, request: Request):
     """
     result = approve_decision(body.log_id, account_id=_account_id(request))
     return {"log_id": body.log_id, **result}
+
+
+@app.post("/decision/reject", tags=["Decisions"], summary="Rifiuta decisione pending")
+def api_reject(body: ApprovalRequest, request: Request):
+    rejected = mark_decision_rejected(body.log_id, account_id=_account_id(request))
+    if not rejected:
+        raise HTTPException(409, "Decisione non disponibile o non più in attesa.")
+    return {"log_id": body.log_id, "status": "rejected"}
 
 
 # ─── Routes: Operations ──────────────────────────────────────────────────────
@@ -687,8 +785,23 @@ def api_market(
 
 # ─── Routes: Telegram ─────────────────────────────────────────────────────────
 
+@app.get("/market/{property_id}/stays", tags=["Market"], summary="Offerte osservate per durata soggiorno")
+def api_market_stays(property_id: int, request: Request, check_in: date,
+                     nights: int = Query(1, ge=1, le=30), guests: int = Query(2, ge=1, le=30)):
+    account_id = _account_id(request)
+    if not get_property_by_id(property_id, account_id=account_id):
+        raise HTTPException(404, "Proprieta non disponibile.")
+    provider = get_market_data_provider()
+    if not hasattr(provider, "analyze_stay"):
+        raise HTTPException(503, "Fonte di preventivi per soggiorno non configurata.")
+    try:
+        return provider.analyze_stay(account_id=account_id, property_id=property_id,
+                                     check_in=check_in, nights=nights, guests=guests)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
 @app.post("/telegram/webhook", tags=["Telegram"], include_in_schema=False)
-async def telegram_webhook(request):
+async def telegram_webhook(request: Request):
     """
     Endpoint per il webhook Telegram.
     Configurare con: POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=<PRICEPILOT_API_BASE_URL>/telegram/webhook
@@ -703,8 +816,8 @@ async def telegram_webhook(request):
         return {"ok": True}
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
+    except Exception:
+        raise HTTPException(500, "Errore interno durante la gestione del webhook Telegram.") from None
 
 
 @app.post("/telegram/link/{prop_id}", tags=["Telegram"],

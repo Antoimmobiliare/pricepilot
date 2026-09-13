@@ -11,6 +11,8 @@ from pricepilot.providers.contracts import (
     OccupancyProvider,
     OccupancyResult,
 )
+from pricepilot.providers.competitors import UnconfiguredCompetitorProvider
+from pricepilot.providers.free_events import FreeEventProvider
 from pricepilot.providers.registry import (
     get_billing_provider,
     get_channel_manager_provider,
@@ -37,6 +39,8 @@ __all__ = [
     "MarketDataResult",
     "OccupancyProvider",
     "OccupancyResult",
+    "FreeEventProvider",
+    "UnconfiguredCompetitorProvider",
     "get_billing_provider",
     "get_channel_manager_provider",
     "get_event_provider",
