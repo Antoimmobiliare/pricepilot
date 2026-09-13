@@ -34,7 +34,8 @@ from pricepilot.core.database import (
     get_price_calendar, upsert_calendar_price,
     get_telegram_approvals, mark_decision_rejected,
 )
-from pricepilot.core.supabase_client import is_supabase_configured
+from pricepilot.core.supabase_client import is_supabase_configured, get_supabase_admin_client
+from pricepilot.core.data_backend import is_supabase_primary
 from pricepilot.services.property_service import (
     list_properties, get_property_by_id, create_property,
     update_property, remove_property,
@@ -132,7 +133,11 @@ def startup():
 
 @app.get("/health", tags=["System"], summary="Stato servizio")
 def api_health():
-    return {"ok": True, "service": "pricepilot"}
+    return {
+        "ok": True,
+        "service": "pricepilot",
+        "revision": os.getenv("RENDER_GIT_COMMIT", os.getenv("GIT_COMMIT", "unknown"))[:12],
+    }
 
 
 @app.get("/ready", tags=["System"], summary="Readiness deploy produzione")
@@ -177,6 +182,7 @@ def _deployment_readiness_checks() -> dict:
     demo_data = any(str(name).startswith("demo") for name in provider_names.values())
     market_not_configured = not own_calendar and provider_names["market"] == "competitor_provider_unconfigured"
     inventory_missing = "unconfigured" in provider_names["occupancy"]
+    schema_ready = _operational_schema_ready()
     return {
         "api_base_url": {
             "ok": bool(api_base_url) or not prod,
@@ -192,6 +198,15 @@ def _deployment_readiness_checks() -> dict:
             "ok": is_supabase_configured() or not prod,
             "required": prod,
             "detail": "Supabase configurato" if is_supabase_configured() else "Supabase non configurato",
+        },
+        "operational_schema": {
+            "ok": schema_ready,
+            "required": is_supabase_primary(),
+            "detail": (
+                "Tabelle operative Supabase disponibili"
+                if schema_ready else
+                "Esegui supabase/prelaunch_finalize.sql nel Supabase SQL Editor"
+            ),
         },
         "telegram_webhook_secret": {
             "ok": bool(get_webhook_secret()) or not prod,
@@ -226,6 +241,20 @@ def _deployment_readiness_checks() -> dict:
             ),
         },
     }
+
+
+def _operational_schema_ready() -> bool:
+    if not is_supabase_primary():
+        return True
+    client = get_supabase_admin_client()
+    if client is None:
+        return False
+    for table in ("operational_documents", "pricing_date_locks"):
+        try:
+            client.table(table).select("account_id").limit(1).execute()
+        except Exception:
+            return False
+    return True
 
 
 class PropertyCreate(BaseModel):

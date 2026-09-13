@@ -283,8 +283,13 @@ def send_cycle_digest(account_id: int, results: list) -> dict:
             actions = (row.get('breakdown') or {}).get('manual_actions') or []
             if actions and row.get('calendar_status') == 'manual_review':
                 action = actions[0]
-                text += (f"{row['date']}: prezzo invariato; valuta soggiorno minimo "
-                         f"{action['current_minimum_stay']} → {action['suggested_minimum_stay']} notti\n")
+                if (action.get('type') == 'minimum_stay_review'
+                        or {'current_minimum_stay', 'suggested_minimum_stay'} <= set(action)):
+                    text += (f"{row['date']}: prezzo invariato; valuta soggiorno minimo "
+                             f"{action['current_minimum_stay']} → {action['suggested_minimum_stay']} notti\n")
+                else:
+                    text += (f"{row['date']}: prezzo invariato; occupazione e pickup "
+                             "danno segnali contrari, verifica manualmente\n")
             else:
                 text += f"{row['date']}: EUR {row['old_price']:.2f} → {row['recommended_price']:.2f}\n"
         if len(rows) > 12:

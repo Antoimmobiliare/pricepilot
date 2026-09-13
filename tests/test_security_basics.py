@@ -6,7 +6,7 @@ import unittest
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pricepilot.core.config import CONFIG
 from pricepilot.core.database import (
@@ -329,6 +329,21 @@ class SecurityBasicsTestCase(unittest.TestCase):
         self.assertFalse(readiness["checks"]["stripe_webhook_secret"]["ok"])
         self.assertFalse(readiness["checks"]["billing_provider"]["ok"])
         self.assertFalse(readiness["checks"]["data_providers"]["ok"])
+
+    def test_cloud_readiness_requires_operational_tables(self):
+        from pricepilot.api import server
+
+        missing = Mock()
+        missing.table.return_value.select.return_value.limit.return_value.execute.side_effect = RuntimeError("missing")
+        complete = Mock()
+        complete.table.return_value.select.return_value.limit.return_value.execute.return_value = SimpleNamespace(data=[])
+        with patch.dict(os.environ, {"PRICEPILOT_DATABASE_BACKEND": "supabase"}), \
+             patch.object(server, "get_supabase_admin_client", return_value=missing):
+            self.assertFalse(server._operational_schema_ready())
+        with patch.dict(os.environ, {"PRICEPILOT_DATABASE_BACKEND": "supabase"}), \
+             patch.object(server, "get_supabase_admin_client", return_value=complete):
+            self.assertTrue(server._operational_schema_ready())
+            self.assertEqual(complete.table.call_count, 2)
 
     def test_telegram_webhook_auto_registration_is_explicit_and_uses_api_url(self):
         from pricepilot.api import server

@@ -63,8 +63,26 @@ class CalendarRuleTests(unittest.TestCase):
         high = self.calculate(policy=own, inventory_context={
             'metrics_complete': True, 'pickup_7d_nights': 7})
         self.assertEqual(low['recommended_price'], 90)
-        self.assertEqual(high['recommended_price'], 108)
+        self.assertEqual(high['recommended_price'], 100)
+        self.assertTrue(high['breakdown']['signal_conflict'])
+        self.assertEqual(high['breakdown']['manual_actions'][0]['type'], 'pricing_signal_conflict')
         self.assertEqual(low['breakdown']['unbounded_reference_target'], 90)
+
+    def test_conflicting_low_occupancy_and_high_pickup_keeps_weekend_price(self):
+        own = policy()
+        own['weekend_multiplier'] = 1.15
+        own['pacing_rule'] = {'enabled': True, 'through_days': 60,
+            'low_pickup_7d_nights': 1, 'high_pickup_7d_nights': 5,
+            'low_multiplier': .95, 'high_multiplier': 1.08}
+        target = date.today() + timedelta(days=(4-date.today().weekday()) % 7)
+        result = calculate_calendar_price(
+            current_price=117, occupancy=.2, target_date=target, policy=own,
+            min_price=50, max_price=200, max_change_pct=.2,
+            inventory_context={'metrics_complete': True, 'pickup_7d_nights': 7},
+        )
+        self.assertEqual(result['recommended_price'], 117)
+        self.assertTrue(result['breakdown']['signal_conflict'])
+        self.assertIn('prezzo invariato', result['reason'])
 
     def test_low_pickup_alone_does_not_trigger_discount(self):
         own = policy()

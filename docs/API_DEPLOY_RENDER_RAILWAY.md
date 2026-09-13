@@ -49,6 +49,7 @@ SUPABASE_URL=https://pdjqtuvxvanimhkpvqff.supabase.co
 SUPABASE_ANON_KEY=your-publishable-or-legacy-anon-key
 SUPABASE_SERVICE_ROLE_KEY=optional-server-side-only
 PRICEPILOT_API_KEY=generate-a-long-random-secret
+PRICEPILOT_SCHEDULER_KEY=generate-a-different-long-random-secret
 TELEGRAM_BOT_TOKEN=your-bot-token
 TELEGRAM_BOT_USERNAME=Price_PilotBot
 TELEGRAM_WEBHOOK_SECRET=generate-a-long-random-secret
@@ -72,6 +73,9 @@ https://pricepilot-api.onrender.com
 ```
 
 8. Imposta `PRICEPILOT_API_BASE_URL` con quell'URL.
+   Inserisci lo stesso `PRICEPILOT_SCHEDULER_KEY` anche nei GitHub Actions secrets,
+   insieme a `PRICEPILOT_API_BASE_URL`. La chiave scheduler deve essere diversa
+   dalle API key degli utenti.
 9. Quando vuoi attivare il webhook Telegram reale, imposta:
 
 ```env

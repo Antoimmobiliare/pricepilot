@@ -458,7 +458,13 @@ def _process_decision(
     # Applica modalita
     manual_actions = pricing.get('breakdown', {}).get('manual_actions') or []
     if own_calendar and abs(recommended-base_price) < .005 and manual_actions:
-        decision_label, applied = ("MANUAL_REVIEW: prezzo invariato; verificare il soggiorno minimo", False)
+        action_type = str(manual_actions[0].get('type') or '')
+        review_reason = (
+            "verificare il soggiorno minimo"
+            if action_type == "minimum_stay_review"
+            else "verificare i segnali calendario in conflitto"
+        )
+        decision_label, applied = (f"MANUAL_REVIEW: prezzo invariato; {review_reason}", False)
     elif own_calendar and abs(recommended-base_price) < .005:
         decision_label, applied = ("UNCHANGED: tariffa gia allineata alle regole calendario", False)
     else:

@@ -225,10 +225,23 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
             'suggested_minimum_stay': gap_nights,
             'reason': f'Vuoto di {gap_nights} notti tra prenotazioni confermate non prenotabile con soggiorno minimo {context["minimum_stay"]}.',
         })
+    signal_conflict = multiplier < 1 and pacing_multiplier > 1
+    if signal_conflict:
+        manual_actions.append({
+            'type': 'pricing_signal_conflict',
+            'occupancy': occupancy,
+            'pickup_7d_nights': pickup,
+            'reason': (
+                'Occupazione sotto la soglia ma pickup recente sopra la soglia: '
+                'mantenere il prezzo e verificare calendario e durata delle nuove prenotazioni.'
+            ),
+        })
     # Upward evidence wins over a discount. Discounts never stack: the most
     # conservative explicit reduction is applied once to the stable reference.
     upward = [m for m in (multiplier, pacing_multiplier) if m > 1]
-    if upward:
+    if signal_conflict:
+        effective_multiplier = 1.0
+    elif upward:
         effective_multiplier = max(upward)
     elif gap_multiplier < 1:
         effective_multiplier = min(multiplier, pacing_multiplier, gap_multiplier)
@@ -236,7 +249,9 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
         effective_multiplier = min(multiplier, pacing_multiplier)
     else:
         effective_multiplier = 1.0
-    candidate = reference * effective_multiplier * weekend_multiplier
+    # Due segnali contrari non giustificano una variazione. Conserviamo il
+    # prezzo pubblicato anche nel weekend e chiediamo una revisione umana.
+    candidate = current_price if signal_conflict else reference * effective_multiplier * weekend_multiplier
     # Only explicit owner constraints, no hidden market/weekend/demand floors.
     recommended, safety = apply_all_safety(
         old_price=current_price, new_price=candidate, min_price=min_price,
@@ -246,7 +261,8 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
               f'dalla data analizzata | Anticipo {days_until} giorni | {rule} | '
               f'Riferimento EUR {reference:.2f} | Fattore occupazione {multiplier:.2f} | '
               f'{pacing_note} | Fattore pacing {pacing_multiplier:.2f} | '
-              f'Fattore weekend impostato {weekend_multiplier:.2f}{gap_note}. '
+              f'Fattore weekend impostato {weekend_multiplier:.2f}{gap_note}'
+              f'{" | Segnali in conflitto: prezzo invariato e revisione manuale" if signal_conflict else ""}. '
               'Confronto competitor a cura del proprietario prima dell’approvazione.')
     return {'recommended_price': recommended, 'delta_vs_base': round((recommended/current_price-1)*100, 2),
             'delta_vs_market': None, 'confidence_score': 0.0,
@@ -257,6 +273,7 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
                 'pacing_multiplier': pacing_multiplier, 'pickup_7d_nights': pickup,
                 'weekend_multiplier': weekend_multiplier, 'lead_time_days': days_until,
                 'gap_multiplier': gap_multiplier, 'gap_nights': gap_nights,
+                'signal_conflict': signal_conflict,
                 'effective_multiplier': effective_multiplier,
                 'unbounded_reference_target': round(candidate, 2),
                 'policy_fingerprint': policy_fingerprint(policy), 'manual_actions': manual_actions,

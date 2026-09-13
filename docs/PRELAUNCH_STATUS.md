@@ -50,6 +50,18 @@ Questi passaggi dipendono dagli account e dagli annunci reali e si completano al
 6. Abilitare `PRICEPILOT_ALLOW_CHANNEL_WRITES=1` soltanto dopo quella prova.
 7. Verificare per più cicli lo scheduler ogni sei ore, i timeout e il recupero dagli errori.
 
+## Audit infrastruttura prima di Luma
+
+Eseguire il controllo in sola lettura senza stampare credenziali:
+
+```powershell
+.\.venv-pp\Scripts\python.exe scripts\audit_prelaunch_infrastructure.py --api-url https://dominio-api
+```
+
+Se mancano `operational_documents` o `pricing_date_locks`, eseguire una sola volta
+`supabase/prelaunch_finalize.sql` nel Supabase SQL Editor e ripetere l'audit. La migrazione
+è idempotente e non sostituisce i dati presenti.
+
 La Home espone quattro stati distinti: configurazione, analisi calendario, proposte Telegram
 e invio prezzi. L’ultimo resta “Da completare” fino a quando tutte le evidenze sopra sono presenti.
 
