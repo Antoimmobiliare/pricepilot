@@ -76,6 +76,9 @@ https://pricepilot-api.onrender.com
    Inserisci lo stesso `PRICEPILOT_SCHEDULER_KEY` anche nei GitHub Actions secrets,
    insieme a `PRICEPILOT_API_BASE_URL`. La chiave scheduler deve essere diversa
    dalle API key degli utenti.
+   Prima di collegare Beds24 crea inoltre la repository variable
+   `PRICEPILOT_SCHEDULER_ENABLED=false`. Al go-live, dopo il collaudo in lettura,
+   cambiala in `true`: soltanto allora il cron chiamera l'API ogni sei ore.
 9. Quando vuoi attivare il webhook Telegram reale, imposta:
 
 ```env

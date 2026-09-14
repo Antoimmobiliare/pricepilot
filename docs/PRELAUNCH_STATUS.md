@@ -1,6 +1,6 @@
 # PricePilot: stato pre-lancio
 
-Aggiornamento: 11 settembre 2026.
+Aggiornamento: 13 settembre 2026.
 
 Il lavoro di pre-lancio è stato integrato direttamente in `ULTIMO PP/PricePilot_v4.1`.
 Il file `.env`, il database, gli utenti e gli altri dati operativi già presenti sono stati
@@ -23,10 +23,12 @@ Il percorso pre-lancio è implementato per funzionare sul calendario proprio del
 - dashboard con dati persistiti; KPI economici mancanti restano “Non disponibile”;
 - blocco dei dati simulati nel percorso operativo e autenticazione locale rifiutata negli
   ambienti `staging`, `prod`, `production` e `live`.
+- scheduler cloud predisposto ogni sei ore ma sospeso in pre-lancio tramite
+  `PRICEPILOT_SCHEDULER_ENABLED=false`, per non generare errori finche Beds24 non e collegato.
 
 Il codice e i test controllati rendono la versione adatta alla configurazione prima degli
 annunci. Non costituiscono una certificazione live di Beds24, Telegram o delle OTA.
-L'ultima suite isolata ha superato 168 test su 168; il risultato riproducibile è salvato
+L'ultima suite isolata ha superato 176 test su 176; il risultato riproducibile è salvato
 in `docs/test-results.json`.
 
 ## Cosa può essere completato prima del lancio di Luma
@@ -48,7 +50,8 @@ Questi passaggi dipendono dagli account e dagli annunci reali e si completano al
 5. Provare una sola modifica tariffaria controllata, rileggerla in Beds24 e verificarla
    separatamente su Airbnb, Booking e Vrbo.
 6. Abilitare `PRICEPILOT_ALLOW_CHANNEL_WRITES=1` soltanto dopo quella prova.
-7. Verificare per più cicli lo scheduler ogni sei ore, i timeout e il recupero dagli errori.
+7. Impostare la repository variable GitHub `PRICEPILOT_SCHEDULER_ENABLED=true`.
+8. Verificare per più cicli lo scheduler ogni sei ore, i timeout e il recupero dagli errori.
 
 ## Audit infrastruttura prima di Luma
 

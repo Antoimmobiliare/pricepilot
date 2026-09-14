@@ -15,6 +15,9 @@ concurrency:
 jobs:
   pricing-cycle:
     name: Run pricing cycle
+    # Il cron resta pronto ma non chiama Beds24 prima del go-live.
+    # Il dispatch manuale continua a funzionare per il collaudo controllato.
+    if: github.event_name == 'workflow_dispatch' || vars.PRICEPILOT_SCHEDULER_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
