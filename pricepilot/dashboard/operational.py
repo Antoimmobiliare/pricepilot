@@ -174,7 +174,7 @@ def render(account_id, section, property_id=None):
             return
         rows = _calendar(account_id, property_id, start.isoformat(), end.isoformat())
         if rows:
-            st.dataframe(_calendar_table(rows), hide_index=True, use_container_width=True)
+            st.dataframe(_calendar_table(rows), hide_index=True, width="stretch")
             st.caption("Prezzo letto, prezzo proposto e prezzo inviato sono valori distinti. L’invio confermato da Beds24 non certifica ancora la propagazione sulle OTA.")
         else:
             st.info("Nessuna tariffa reale registrata nel periodo.")
@@ -199,12 +199,12 @@ def render(account_id, section, property_id=None):
         runs = _runs(account_id)
         if runs:
             st.write("Ultimi cicli")
-            st.dataframe(runs, hide_index=True, use_container_width=True)
+            st.dataframe(runs, hide_index=True, width="stretch")
     if section in {"pricing", "analytics"}:
         decisions = _decisions(account_id, property_id)
         if decisions:
             st.write("Ultime decisioni")
-            st.dataframe(decisions, hide_index=True, use_container_width=True)
+            st.dataframe(decisions, hide_index=True, width="stretch")
         else:
             st.info("Nessuna decisione registrata.")
     if section in {"home", "analytics"}:

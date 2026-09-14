@@ -1344,7 +1344,7 @@ def render_sidebar():
             ),
         )
 
-        if st.button("💾 Salva configurazione", use_container_width=True):
+        if st.button("💾 Salva configurazione", width="stretch"):
             if float(min_price) >= float(max_price):
                 st.error("Il prezzo minimo deve essere inferiore al prezzo massimo.")
                 return load_config()
@@ -1517,7 +1517,7 @@ def _tab_onboarding():
                     _b1, _b2 = st.columns([1, 1])
                     with _b1:
                         if st.button("✅ Conferma proprietà", type="primary",
-                                     use_container_width=True, key="onb_confirm"):
+                                     width="stretch", key="onb_confirm"):
                             if not _name_val.strip():
                                 st.error("Inserisci il nome della proprietà.")
                             else:
@@ -1528,7 +1528,7 @@ def _tab_onboarding():
                                 st.session_state[_step_key] = 2
                                 st.rerun()
                     with _b2:
-                        if st.button("✏️ Modifica", use_container_width=True,
+                        if st.button("✏️ Modifica", width="stretch",
                                      key="onb_edit"):
                             st.session_state[_url_key] = ""
                             st.rerun()
@@ -1556,7 +1556,7 @@ def _tab_onboarding():
                     )
 
                     if st.button("Avanti →", type="primary",
-                                 use_container_width=True, key="onb_manual_next"):
+                                 width="stretch", key="onb_manual_next"):
                         if not _name_val.strip():
                             st.error("Inserisci il nome della proprietà.")
                         else:
@@ -1631,12 +1631,12 @@ def _tab_onboarding():
 
             _bk1, _bk2 = st.columns([1, 1])
             with _bk1:
-                if st.button("← Indietro", use_container_width=True, key="onb_back2"):
+                if st.button("← Indietro", width="stretch", key="onb_back2"):
                     st.session_state[_step_key] = 1
                     st.rerun()
             with _bk2:
                 if st.button("🚀 Attiva autopilot", type="primary",
-                             use_container_width=True, key="onb_activate"):
+                             width="stretch", key="onb_activate"):
                     if _min_val >= _max_val:
                         st.error("Il prezzo minimo deve essere inferiore al massimo.")
                     else:
@@ -1682,7 +1682,7 @@ def _tab_onboarding():
 
             if not _existing_link:
                 if st.button("📱 Connetti Telegram", type="primary",
-                             use_container_width=True, key="onb_tg_connect"):
+                             width="stretch", key="onb_tg_connect"):
                     with st.spinner("Generazione link…"):
                         try:
                             _token = f"connect_{_pid}_{_sec.token_hex(8)}"
@@ -1724,12 +1724,12 @@ def _tab_onboarding():
 
             _bt1, _bt2 = st.columns([1, 1])
             with _bt1:
-                if st.button("← Indietro", use_container_width=True, key="onb_back3"):
+                if st.button("← Indietro", width="stretch", key="onb_back3"):
                     st.session_state[_step_key] = 2
                     st.rerun()
             with _bt2:
                 _skip_label = "Salta per ora →" if not _existing_link else "Avanti →"
-                if st.button(_skip_label, use_container_width=True, key="onb_skip3",
+                if st.button(_skip_label, width="stretch", key="onb_skip3",
                              type="secondary" if not _existing_link else "primary"):
                     st.session_state[_step_key] = 4
                     st.rerun()
@@ -1789,7 +1789,7 @@ def _tab_onboarding():
             )
 
             if st.button("🏠 Vai alla dashboard", type="primary",
-                         use_container_width=True, key="onb_finish"):
+                         width="stretch", key="onb_finish"):
                 # Clear onboarding state
                 for _k in [_step_key, _url_key, _name_key, _city_key,
                            _plat_key, _min_key, _max_key, _tglink_key,
@@ -1875,15 +1875,15 @@ def _render_billing_action(account_id: int, account: dict, *, key_prefix: str = 
     customer_id = str(account.get("stripe_customer_id") or "").strip()
 
     if not is_configured:
-        st.button("Cambia piano", key=f"{key_prefix}_disabled", use_container_width=True, disabled=True)
+        st.button("Cambia piano", key=f"{key_prefix}_disabled", width="stretch", disabled=True)
         st.caption("Upgrade non ancora attivo: configura Stripe test/live per abilitare checkout e portale cliente.")
         return
 
     if customer_id:
-        if st.button("Gestisci piano", key=f"{key_prefix}_portal", use_container_width=True):
+        if st.button("Gestisci piano", key=f"{key_prefix}_portal", width="stretch"):
             result = provider.create_customer_portal(account_id=account_id)
             if result.ok and result.url:
-                st.link_button("Apri area billing", result.url, use_container_width=True)
+                st.link_button("Apri area billing", result.url, width="stretch")
             else:
                 st.error(result.error or "Impossibile aprire il customer portal.")
         return
@@ -1898,10 +1898,10 @@ def _render_billing_action(account_id: int, account: dict, *, key_prefix: str = 
         key=f"{key_prefix}_target",
         label_visibility="collapsed",
     )
-    if st.button("Cambia piano", key=f"{key_prefix}_checkout", use_container_width=True):
+    if st.button("Cambia piano", key=f"{key_prefix}_checkout", width="stretch"):
         result = provider.create_checkout_session(account_id=account_id, plan=target_plan)
         if result.ok and result.url:
-            st.link_button("Apri checkout Stripe", result.url, use_container_width=True)
+            st.link_button("Apri checkout Stripe", result.url, width="stretch")
         else:
             st.error(result.error or "Impossibile creare il checkout.")
 
@@ -1993,7 +1993,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                 step_one_submitted = st.form_submit_button(
                     "Avanti",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             if step_one_submitted:
@@ -2079,11 +2079,11 @@ def _tab_onboarding_v2(surface: str = "main"):
 
             b1, b2 = st.columns([1, 1])
             with b1:
-                if st.button("Indietro", use_container_width=True, key=widget_key("onb_step2_back")):
+                if st.button("Indietro", width="stretch", key=widget_key("onb_step2_back")):
                     st.session_state[step_key] = 1
                     st.rerun()
             with b2:
-                if st.button("Avanti", type="primary", use_container_width=True, key=widget_key("onb_step2_next")):
+                if st.button("Avanti", type="primary", width="stretch", key=widget_key("onb_step2_next")):
                     if not platforms:
                         st.error("Seleziona almeno una piattaforma.")
                     elif min_price >= max_price:
@@ -2114,7 +2114,7 @@ def _tab_onboarding_v2(surface: str = "main"):
 
             b1, b2 = st.columns([1, 1])
             with b1:
-                if st.button("Indietro", use_container_width=True, key=widget_key("onb_step3_back")):
+                if st.button("Indietro", width="stretch", key=widget_key("onb_step3_back")):
                     st.session_state[step_key] = 2
                     st.rerun()
             with b2:
@@ -2123,7 +2123,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                     "plus": "Attiva approvazione",
                     "pro": "Attiva autopilot",
                 }[plan]
-                if st.button(cta, type="primary", use_container_width=True, key=widget_key("onb_create_property")):
+                if st.button(cta, type="primary", width="stretch", key=widget_key("onb_create_property")):
                     try:
                         st.session_state["onb_plan"] = plan
                         update_account_profile(
@@ -2215,7 +2215,7 @@ def _tab_onboarding_v2(surface: str = "main"):
 
             link_data = st.session_state.get("onb_tg_link")
             if not link_data and prop_id:
-                if st.button("Genera link Telegram", type="primary", use_container_width=True, key=widget_key("onb_generate_tg")):
+                if st.button("Genera link Telegram", type="primary", width="stretch", key=widget_key("onb_generate_tg")):
                     try:
                         from pricepilot.services.telegram_bot import create_property_link
                         link_data = create_property_link(int(prop_id))
@@ -2255,11 +2255,11 @@ def _tab_onboarding_v2(surface: str = "main"):
 
             b1, b2 = st.columns([1, 1])
             with b1:
-                if st.button("Indietro", use_container_width=True, key=widget_key("onb_step4_back")):
+                if st.button("Indietro", width="stretch", key=widget_key("onb_step4_back")):
                     st.session_state[step_key] = 3
                     st.rerun()
             with b2:
-                if st.button("Vai alla dashboard", type="primary", use_container_width=True, key=widget_key("onb_done")):
+                if st.button("Vai alla dashboard", type="primary", width="stretch", key=widget_key("onb_done")):
                     active_prop_id = st.session_state.get("active_prop_id")
                     _clear_onboarding_state()
                     if active_prop_id:
@@ -2623,7 +2623,7 @@ def tab_home(cfg: dict):
     with c_run:
         if st.button(
             "Esegui ciclo ora",
-            use_container_width=True,
+            width="stretch",
             key="manual_pricing_cycle",
             disabled=(not can_run_manual_cycle or _run_is_running),
         ):
@@ -2686,7 +2686,7 @@ def tab_home(cfg: dict):
                     "Origine": run_row.get("source", ""),
                     "Prossimo": next_run,
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
             if latest_errors:
                 st.markdown("**Ultimi errori per proprietà**")
                 for err in latest_errors[:5]:
@@ -3357,7 +3357,7 @@ def tab_home(cfg: dict):
                 )
             with col_approve:
                 if st.button("✅ SI", key=f"home_app_{item['id']}",
-                             use_container_width=True, type="primary"):
+                             width="stretch", type="primary"):
                     result = approve_decision(item["id"], account_id=account_id)
                     record_telegram_approval({
                         "account_id": account_id,
@@ -3372,7 +3372,7 @@ def tab_home(cfg: dict):
                     st.rerun()
             with col_reject:
                 if st.button("❌ NO", key=f"home_rej_{item['id']}",
-                             use_container_width=True):
+                             width="stretch"):
                     mark_decision_rejected(item["id"], account_id)
                     update_calendar_status_for_decision(
                         decision_log_id=item["id"],
@@ -3677,7 +3677,7 @@ def tab_pricing(cfg: dict):
                 "Strategia attiva" if _active else f"Passa a {_slbl}",
                 key=f"ps_btn_{_skey}_{_sel_id}",
                 disabled=_active,
-                use_container_width=True,
+                width="stretch",
             ):
                 _new_strategy = _skey
 
@@ -3792,7 +3792,7 @@ def tab_pricing(cfg: dict):
             type="primary",
             key=f"ps_save_{_sel_id}",
             disabled=_btn_disabled,
-            use_container_width=True,
+            width="stretch",
         ):
             try:
                 save_synced_price_limits(
@@ -4132,7 +4132,7 @@ def tab_analytics(cfg: dict):
             plot_bgcolor="white", paper_bgcolor="white",
             legend=dict(orientation="h", y=1.02),
         )
-        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
     # ── Variazione % prezzi ───────────────────────────────────────────────────
     col_a, col_b = st.columns(2)
@@ -4151,7 +4151,7 @@ def tab_analytics(cfg: dict):
         fig2.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
         fig2.update_layout(height=350, showlegend=False,
                            plot_bgcolor="white", paper_bgcolor="white")
-        st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig2, width="stretch", config=PLOTLY_CONFIG)
 
     with col_b:
         st.markdown('<div class="section-title">🎉 Impatto Eventi</div>',
@@ -4170,7 +4170,7 @@ def tab_analytics(cfg: dict):
             fig3.update_traces(texttemplate="€%{text:.2f}", textposition="outside")
             fig3.update_layout(height=350, showlegend=False,
                                plot_bgcolor="white", paper_bgcolor="white")
-            st.plotly_chart(fig3, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig3, width="stretch", config=PLOTLY_CONFIG)
 
     # ── Occupancy vs Prezzo scatter ───────────────────────────────────────────
     st.markdown('<div class="section-title">📊 Correlazione Occupazione → Prezzo</div>',
@@ -4189,7 +4189,7 @@ def tab_analytics(cfg: dict):
             opacity=0.7,
         )
         fig4.update_layout(height=380, plot_bgcolor="white", paper_bgcolor="white")
-        st.plotly_chart(fig4, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig4, width="stretch", config=PLOTLY_CONFIG)
 
     # ── Breakdown per strategia ───────────────────────────────────────────────
     col_c, col_d = st.columns(2)
@@ -4203,7 +4203,7 @@ def tab_analytics(cfg: dict):
                           title="Distribuzione decisioni per strategia",
                           color_discrete_sequence=px.colors.qualitative.Pastel)
             fig5.update_layout(height=300)
-            st.plotly_chart(fig5, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig5, width="stretch", config=PLOTLY_CONFIG)
 
     with col_d:
         st.markdown('<div class="section-title">💹 Revenue Stimata</div>',
@@ -4218,7 +4218,7 @@ def tab_analytics(cfg: dict):
                           labels={"month": "Mese", "est_revenue": "Revenue (€)"},
                           color_discrete_sequence=["#667eea"])
             fig6.update_layout(height=300, plot_bgcolor="white", paper_bgcolor="white")
-            st.plotly_chart(fig6, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig6, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -4397,7 +4397,7 @@ def _render_decision_flow_card(
     if status_key == "pending" and decision_id:
         col_yes, col_no, col_note = st.columns([1.1, 1.1, 4])
         with col_yes:
-            if st.button("Approva", key=f"{key_prefix}_approve_{decision_id}", type="primary", use_container_width=True):
+            if st.button("Approva", key=f"{key_prefix}_approve_{decision_id}", type="primary", width="stretch"):
                 from pricepilot.engine.decision_engine import approve_decision
 
                 result = approve_decision(decision_id, account_id=account_id)
@@ -4416,7 +4416,7 @@ def _render_decision_flow_card(
                     st.error(result.get("message", "Impossibile approvare questa decisione."))
                 st.rerun()
         with col_no:
-            if st.button("Rifiuta", key=f"{key_prefix}_reject_{decision_id}", use_container_width=True):
+            if st.button("Rifiuta", key=f"{key_prefix}_reject_{decision_id}", width="stretch"):
                 mark_decision_rejected(decision_id, account_id)
                 try:
                     update_calendar_status_for_decision(
@@ -4560,17 +4560,17 @@ def _tab_decisions_v2(cfg: dict):
     else:
         st.warning("Sto usando lo storico legacy: le nuove decisioni avranno stati più chiari.")
         df_show = df_legacy.sort_values("timestamp", ascending=False).head(n_rows)
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
+        st.dataframe(df_show, width="stretch", hide_index=True)
 
     st.markdown("---")
     e1, e2 = st.columns(2)
     with e1:
-        if st.button("Esporta CSV", use_container_width=True, key="decision_flow_export_csv"):
+        if st.button("Esporta CSV", width="stretch", key="decision_flow_export_csv"):
             path = export_csv(account_id=account_id)
             if path:
                 st.success(f"Esportato: `{path}`")
     with e2:
-        if st.button("Esporta JSON", use_container_width=True, key="decision_flow_export_json"):
+        if st.button("Esporta JSON", width="stretch", key="decision_flow_export_json"):
             path = export_json(account_id=account_id)
             if path:
                 st.success(f"Esportato: `{path}`")
@@ -4815,18 +4815,18 @@ def tab_decisions(cfg: dict):
             df_disp["Occupazione"] = df_disp["Occupazione"].apply(
                 lambda x: f"{x*100:.0f}%" if pd.notna(x) else "—"
             )
-        st.dataframe(df_disp, use_container_width=True, hide_index=True)
+        st.dataframe(df_disp, width="stretch", hide_index=True)
 
     # ── Export ────────────────────────────────────────────────────────────────
     st.markdown("---")
     ec1, ec2 = st.columns(2)
     with ec1:
-        if st.button("⬇️ Esporta CSV", use_container_width=True):
+        if st.button("⬇️ Esporta CSV", width="stretch"):
             path = export_csv(account_id=account_id)
             if path:
                 st.success(f"✅ Esportato: `{path}`")
     with ec2:
-        if st.button("⬇️ Esporta JSON", use_container_width=True):
+        if st.button("⬇️ Esporta JSON", width="stretch"):
             path = export_json(account_id=account_id)
             if path:
                 st.success(f"✅ Esportato: `{path}`")
@@ -4883,7 +4883,7 @@ def tab_events():
         })
 
     df_cal = pd.DataFrame(rows)
-    st.dataframe(df_cal, use_container_width=True, hide_index=True)
+    st.dataframe(df_cal, width="stretch", hide_index=True)
 
     # Mini chart calendario
     fig = px.line(df_cal, x="Data", y="Prezzo (€)",
@@ -4897,7 +4897,7 @@ def tab_events():
                       fillcolor="#f39c12", opacity=0.15, line_width=0)
     fig.update_layout(height=380, plot_bgcolor="white", paper_bgcolor="white",
                       hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -4997,7 +4997,7 @@ def tab_properties():
         _render_readonly_plan_box(current_plan, compact=True)
     with a3:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Salva account", key="account_profile_save", use_container_width=True):
+        if st.button("Salva account", key="account_profile_save", width="stretch"):
             update_account_profile(account_id, {"name": account_name.strip() or "La mia attività"})
             for prop in props:
                 update_property(prop["id"], {
@@ -5079,7 +5079,7 @@ def tab_properties():
                 placeholder="08:00",
                 key="notif_quiet_end",
             )
-        if st.button("Salva notifiche", key="notif_save", use_container_width=True):
+        if st.button("Salva notifiche", key="notif_save", width="stretch"):
             update_notification_preferences(account_id, 0, {
                 "telegram_enabled": int(telegram_enabled),
                 "approval_alerts": int(approval_alerts),
@@ -5125,7 +5125,7 @@ def tab_properties():
                     )
                 with c3:
                     st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("Salva", key=f"save_current_price_{p['id']}", use_container_width=True):
+                    if st.button("Salva", key=f"save_current_price_{p['id']}", width="stretch"):
                         upsert_calendar_price({
                             "account_id": account_id,
                             "property_id": int(p["id"]),
@@ -5415,7 +5415,7 @@ def tab_properties():
 
         col_next = st.columns([3, 1])[1]
         with col_next:
-            if st.button("Avanti →", key="step1_next", use_container_width=True, type="primary"):
+            if st.button("Avanti →", key="step1_next", width="stretch", type="primary"):
                 # Leggi i valori correnti dai widget prima che st.rerun() pulisca i loro key
                 _name_now = st.session_state.get("pf_name", pf_name).strip()
                 if not _name_now:
@@ -5489,11 +5489,11 @@ def tab_properties():
 
         col_back, col_next = st.columns(2)
         with col_back:
-            if st.button("← Indietro", key="step2_back", use_container_width=True):
+            if st.button("← Indietro", key="step2_back", width="stretch"):
                 st.session_state[form_key] = 1
                 st.rerun()
         with col_next:
-            if st.button("Avanti →", key="step2_next", use_container_width=True, type="primary"):
+            if st.button("Avanti →", key="step2_next", width="stretch", type="primary"):
                 # Salva la strategia nel draft prima che il widget venga rimosso
                 st.session_state[draft_key]["strategy"] = st.session_state.get(
                     "pf_strategy", pf_strategy
@@ -5582,14 +5582,14 @@ def tab_properties():
 
         col_back, col_save, col_del = st.columns([1, 2, 1])
         with col_back:
-            if st.button("← Indietro", key="step3_back", use_container_width=True):
+            if st.button("← Indietro", key="step3_back", width="stretch"):
                 st.session_state[form_key] = 2
                 st.rerun()
         with col_save:
             if st.button(
                 "💾 Salva proprietà" if is_edit else "➕ Crea proprietà",
                 key="step3_save",
-                use_container_width=True,
+                width="stretch",
                 type="primary",
                 disabled=(pf_min >= pf_max),
             ):
@@ -5676,7 +5676,7 @@ def tab_properties():
         with col_del:
             if is_edit and st.button(
                 "🗑️ Elimina", key="step3_del",
-                use_container_width=True, type="secondary",
+                width="stretch", type="secondary",
             ):
                 from pricepilot.core.database import delete_property
                 delete_property(existing["id"])
@@ -5734,7 +5734,7 @@ def tab_simulator():
         if event_sel != "none":
             event_factor = st.slider("🎯 Intensità evento", 1.0, 2.0, 1.2, step=0.05)
 
-        sim_btn = st.button("▶️ Esegui Simulazione", use_container_width=True, type="primary")
+        sim_btn = st.button("▶️ Esegui Simulazione", width="stretch", type="primary")
 
     if sim_btn:
         # ── Analisi mercato ───────────────────────────────────────────────────
@@ -5808,7 +5808,7 @@ def tab_simulator():
                     unsafe_allow_html=True)
         breakdown = result["breakdown"]
         bd_rows = [{"Fattore": k, "Effetto": v} for k, v in breakdown.items()]
-        st.dataframe(pd.DataFrame(bd_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(bd_rows), width="stretch", hide_index=True)
 
         # ── Grafico competitor ────────────────────────────────────────────────
         st.markdown('<div class="section-title">🏘️ Prezzi Competitor</div>',
@@ -5837,7 +5837,7 @@ def tab_simulator():
             plot_bgcolor="white", paper_bgcolor="white",
             xaxis_tickangle=-30,
         )
-        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
         # ── Scatter: price vs occupancy ───────────────────────────────────────
         df_comp["size"] = df_comp["rating"] * 3
@@ -5852,7 +5852,7 @@ def tab_simulator():
         fig2.add_hline(y=rec, line_dash="dash", line_color="#f39c12",
                        annotation_text=f"Nostro: €{rec:.2f}")
         fig2.update_layout(height=360, plot_bgcolor="white", paper_bgcolor="white")
-        st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(fig2, width="stretch", config=PLOTLY_CONFIG)
 
         # ── Market history per proprietà ──────────────────────────────────────
         mkt_hist = _cached_market_history(current_account_id(), prop_id, limit=30)
@@ -5881,7 +5881,7 @@ def tab_simulator():
                 height=320, plot_bgcolor="white", paper_bgcolor="white",
                 hovermode="x unified",
             )
-            st.plotly_chart(fig3, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig3, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -6018,7 +6018,7 @@ def tab_calendar(cfg: dict):
     cal_month = sel_month_date.month
 
     with cc3:
-        if st.button("🔄 Rigenera", key="cal_regen", use_container_width=True,
+        if st.button("🔄 Rigenera", key="cal_regen", width="stretch",
                      help="Ricalcola i prezzi per i prossimi 90 giorni"):
             ck = f"cal_prices_{sel_pid}"
             if ck in st.session_state:
@@ -6157,7 +6157,7 @@ def tab_calendar(cfg: dict):
                 if st.button(
                     btn_label,
                     key=f"cal_btn_{d_iso}",
-                    use_container_width=True,
+                    width="stretch",
                     type=btn_type,
                     disabled=is_past and not in_range,
                 ):
@@ -6308,7 +6308,7 @@ def tab_calendar(cfg: dict):
                 if st.button(
                     _apply_label,
                     key=f"cal_apply_rec_{d_iso}",
-                    use_container_width=True,
+                    width="stretch",
                     type="primary",
                 ):
                     if f"cal_overrides_{sel_pid}" not in st.session_state:
@@ -6350,7 +6350,7 @@ def tab_calendar(cfg: dict):
             ov_c1, ov_c2 = st.columns(2)
             with ov_c1:
                 if st.button("💾 Salva modifica", key=f"cal_ov_save_{d_iso}",
-                             use_container_width=True, type="primary",
+                             width="stretch", type="primary",
                              disabled=is_locked_day):
                     if f"cal_overrides_{sel_pid}" not in st.session_state:
                         st.session_state[f"cal_overrides_{sel_pid}"] = {}
@@ -6373,7 +6373,7 @@ def tab_calendar(cfg: dict):
             with ov_c2:
                 if ov_p and not is_locked_day and st.button(
                     "🔄 Ripristina", key=f"cal_ov_del_{d_iso}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     ovs = st.session_state.get(f"cal_overrides_{sel_pid}", {})
                     ovs.pop(d_iso, None)
@@ -6406,7 +6406,7 @@ def tab_calendar(cfg: dict):
                 )
                 if st.button(
                     "🔓 Sblocca Prezzo", key=f"cal_unlock_{d_iso}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.session_state[lock_key].pop(d_iso, None)
                     upsert_calendar_price({
@@ -6428,7 +6428,7 @@ def tab_calendar(cfg: dict):
                 lock_val = float(ov_input)   # usa il valore corrente nel campo
                 if st.button(
                     f"🔒 Blocca a €{lock_val:.0f}", key=f"cal_lock_{d_iso}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     if lock_key not in st.session_state:
                         st.session_state[lock_key] = {}
@@ -6591,7 +6591,7 @@ def tab_calendar(cfg: dict):
         ),
         margin=dict(t=70, r=20, b=40, l=50),
     )
-    st.plotly_chart(fig_cal, use_container_width=True, config=PLOTLY_CONFIG)
+    st.plotly_chart(fig_cal, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -6728,7 +6728,7 @@ def tab_telegram():
             with col_a:
                 st.caption("Le notifiche di pricing vengono inviate su Telegram.")
             with col_b:
-                if st.button("Test collegamento", key=f"tg_test_{prop_id}", use_container_width=True):
+                if st.button("Test collegamento", key=f"tg_test_{prop_id}", width="stretch"):
                     try:
                         with st.spinner("Invio test Telegram..."):
                             from pricepilot.services.telegram_bot import send_message
@@ -6739,7 +6739,7 @@ def tab_telegram():
                     except Exception as exc:
                         st.error(f"Errore invio test: {exc}")
             with col_c:
-                if st.button("🔓 Scollega", key=f"rev_{prop_id}", use_container_width=True):
+                if st.button("🔓 Scollega", key=f"rev_{prop_id}", width="stretch"):
                     revoke_telegram_link(prop_id)
                     for k in list(st.session_state.keys()):
                         if k.startswith(f"tg_link_{prop_id}"):
@@ -6755,7 +6755,7 @@ def tab_telegram():
                 connect_btn = st.button(
                     "📱 Connetti Telegram",
                     key=f"conn_{prop_id}",
-                    use_container_width=True,
+                    width="stretch",
                     type="primary",
                 )
 
@@ -6882,7 +6882,7 @@ def tab_telegram():
                     unsafe_allow_html=True,
                 )
             with cb:
-                if st.button("✅", key=f"app_{p['id']}", help="Approva", use_container_width=True):
+                if st.button("✅", key=f"app_{p['id']}", help="Approva", width="stretch"):
                     result = approve_decision(p["id"], account_id=current_account_id())
                     record_telegram_approval({
                         "account_id": current_account_id(),
@@ -6896,7 +6896,7 @@ def tab_telegram():
                     st.toast("Approvato. Aggiorna manualmente il prezzo sul canale.", icon="✅")
                     st.rerun()
             with cc:
-                if st.button("❌", key=f"rej_{p['id']}", help="Rifiuta", use_container_width=True):
+                if st.button("❌", key=f"rej_{p['id']}", help="Rifiuta", width="stretch"):
                     mark_decision_rejected(p["id"], current_account_id())
                     update_calendar_status_for_decision(
                         decision_log_id=p["id"],
@@ -6933,7 +6933,7 @@ def tab_telegram():
                 "Origine": "Telegram" if item.get("source") == "telegram" else "Dashboard",
                 "Utente": item.get("telegram_username") or item.get("chat_id") or "-",
             })
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
     else:
         st.info("Nessuna approvazione o rifiuto registrato.")
 
@@ -7076,7 +7076,7 @@ def tab_integrations():
                 if not plat_configured:
                     if st.button(
                         "🔗 Configura", key=f"integ_connect_{prop['id']}",
-                        use_container_width=True,
+                        width="stretch",
                         help=f"Imposta le credenziali API per {plat_meta['label']} nel file .env",
                     ):
                         st.session_state[f"integ_show_help_{prop['id']}"] = True
@@ -7126,7 +7126,7 @@ def tab_integrations():
     if _smoobu_configured:
         t1, t2 = st.columns([1, 3])
         with t1:
-            if st.button("Test Smoobu", key="smoobu_test_connection", use_container_width=True):
+            if st.button("Test Smoobu", key="smoobu_test_connection", width="stretch"):
                 try:
                     from pricepilot.integrations.smoobu import SmoobuAdapter
                     test = SmoobuAdapter().test_connection()
@@ -7363,7 +7363,7 @@ def tab_auto_log():
                 height=340, plot_bgcolor="white", paper_bgcolor="white",
                 hovermode="x unified",
             )
-            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+            st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

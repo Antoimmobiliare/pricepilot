@@ -137,13 +137,13 @@ def render_policy(account_id, prop):
         bands = [{'Fino a giorni': x['through_days'], 'Soglia bassa (%)': x['low_occupancy']*100,
                   'Soglia alta (%)': x['high_occupancy']*100, 'Variazione sotto soglia (%)': round((x['low_multiplier']-1)*100, 2),
                   'Variazione sopra soglia (%)': round((x['high_multiplier']-1)*100, 2)} for x in policy['lead_time_bands']]
-        edited = st.data_editor(pd.DataFrame(bands), hide_index=True, num_rows='dynamic', use_container_width=True,
+        edited = st.data_editor(pd.DataFrame(bands), hide_index=True, num_rows='dynamic', width="stretch",
                                key=f'bands_{account_id}_{prop["id"]}')
         st.caption('Le soglie non sono una previsione della domanda. Imposta variazioni 0% per le finestre in cui vuoi solo osservare.')
         overrides = [{'Data': date.fromisoformat(day), 'Riferimento (€)': amount}
                      for day, amount in sorted(policy.get('date_reference_prices', {}).items())]
         dates = st.data_editor(pd.DataFrame(overrides, columns=['Data', 'Riferimento (€)']),
-                    num_rows='dynamic', hide_index=True, use_container_width=True,
+                    num_rows='dynamic', hide_index=True, width="stretch",
                     column_config={'Data': st.column_config.DateColumn('Data'),
                                    'Riferimento (€)': st.column_config.NumberColumn('Riferimento (€)', min_value=1)},
                     key=f'date_rates_{account_id}_{prop["id"]}')

@@ -292,7 +292,7 @@ def render_logout_button():
             f"padding:4px 0 2px;'>{email}</div>",
             unsafe_allow_html=True,
         )
-        if st.button("Esci", key="pp_logout_btn", use_container_width=True):
+        if st.button("Esci", key="pp_logout_btn", width="stretch"):
             logout()
             st.rerun()
 
@@ -980,10 +980,10 @@ def _render_public_nav():
             unsafe_allow_html=True,
         )
     with login_col:
-        if st.button("Login", key="public_nav_login", use_container_width=True):
+        if st.button("Login", key="public_nav_login", width="stretch"):
             _go_public("login")
     with cta_col:
-        if st.button("Inizia Gratis", key="public_nav_signup", use_container_width=True, type="primary"):
+        if st.button("Inizia Gratis", key="public_nav_signup", width="stretch", type="primary"):
             _go_public("register", "free")
 
 
@@ -1001,7 +1001,7 @@ def _render_landing_page():
             '</section>',
             unsafe_allow_html=True,
         )
-        if st.button("Inizia Gratis", key="hero_start_free", use_container_width=True, type="primary"):
+        if st.button("Inizia Gratis", key="hero_start_free", width="stretch", type="primary"):
             _go_public("register", "free")
         st.markdown(
             '<div class="pp-proof-row">'
@@ -1503,7 +1503,7 @@ def _pricing_card(
             f'<ul class="pp-feature-list">{feature_items}</ul>{missing_html}</div>',
             unsafe_allow_html=True,
         )
-        if st.button(cta, key=f"public_price_{plan}", use_container_width=True, type="primary" if recommended else "secondary"):
+        if st.button(cta, key=f"public_price_{plan}", width="stretch", type="primary" if recommended else "secondary"):
             _go_public("register", plan)
 
 
@@ -1555,7 +1555,7 @@ def _render_final_cta_section():
     )
     _, col, _ = st.columns([1.2, 1, 1.2])
     with col:
-        if st.button("Inizia Gratis", key="final_start_free", use_container_width=True, type="primary"):
+        if st.button("Inizia Gratis", key="final_start_free", width="stretch", type="primary"):
             _go_public("register", "free")
     return
     st.markdown(
@@ -1567,7 +1567,7 @@ def _render_final_cta_section():
     )
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        if st.button("Inizia Gratis", key="final_start_free", use_container_width=True, type="primary"):
+        if st.button("Inizia Gratis", key="final_start_free", width="stretch", type="primary"):
             _go_public("register", "free")
 
 
@@ -1582,13 +1582,13 @@ def _render_public_legal_footer():
     )
     c1, c2, c3, c4 = st.columns([1, 1, 1, 5])
     with c1:
-        if st.button("Termini", key="footer_terms", use_container_width=True):
+        if st.button("Termini", key="footer_terms", width="stretch"):
             _go_public("terms")
     with c2:
-        if st.button("Privacy", key="footer_privacy", use_container_width=True):
+        if st.button("Privacy", key="footer_privacy", width="stretch"):
             _go_public("privacy")
     with c3:
-        if st.button("Cookie", key="footer_cookies", use_container_width=True):
+        if st.button("Cookie", key="footer_cookies", width="stretch"):
             _go_public("cookies")
     st.markdown(
         '<div class="pp-legal-note">Nota: questi documenti sono una base operativa per beta e pre-lancio. '
@@ -1639,21 +1639,21 @@ def _render_auth_panel(client, view: str):
             if view == "login":
                 login_email = st.text_input("Email", key="auth_login_email", placeholder="mario@esempio.it")
                 login_pw = st.text_input("Password", key="auth_login_pw", type="password", placeholder="Password")
-                if st.button("Accedi", key="auth_login_btn", use_container_width=True, type="primary"):
+                if st.button("Accedi", key="auth_login_btn", width="stretch", type="primary"):
                     _do_login(client, login_email, login_pw)
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("Crea account", key="auth_to_register", use_container_width=True):
+                    if st.button("Crea account", key="auth_to_register", width="stretch"):
                         _go_public("register")
                 with c2:
-                    if st.button("Password dimenticata", key="auth_to_forgot", use_container_width=True):
+                    if st.button("Password dimenticata", key="auth_to_forgot", width="stretch"):
                         _go_public("forgot")
 
             elif view == "forgot":
                 reset_email = st.text_input("Email", key="auth_forgot_email", placeholder="mario@esempio.it")
-                if st.button("Invia link di recupero", key="auth_forgot_btn", use_container_width=True, type="primary"):
+                if st.button("Invia link di recupero", key="auth_forgot_btn", width="stretch", type="primary"):
                     _do_password_reset(client, reset_email)
-                if st.button("Torna al login", key="forgot_to_login", use_container_width=True):
+                if st.button("Torna al login", key="forgot_to_login", width="stretch"):
                     _go_public("login")
 
             elif view == "reset_password":
@@ -1669,9 +1669,9 @@ def _render_auth_panel(client, view: str):
                     type="password",
                     placeholder="Ripeti la nuova password",
                 )
-                if st.button("Aggiorna password", key="auth_update_pw_btn", use_container_width=True, type="primary"):
+                if st.button("Aggiorna password", key="auth_update_pw_btn", width="stretch", type="primary"):
                     _do_update_password(client, new_pw, confirm_pw)
-                if st.button("Torna al login", key="reset_to_login", use_container_width=True):
+                if st.button("Torna al login", key="reset_to_login", width="stretch"):
                     _go_public("login")
 
             else:
@@ -1711,15 +1711,15 @@ def _render_auth_panel(client, view: str):
                 )
                 legal_col_1, legal_col_2, legal_col_3 = st.columns(3)
                 with legal_col_1:
-                    if st.button("Leggi Termini", key="auth_read_terms", use_container_width=True):
+                    if st.button("Leggi Termini", key="auth_read_terms", width="stretch"):
                         _go_public("terms")
                 with legal_col_2:
-                    if st.button("Leggi Privacy", key="auth_read_privacy", use_container_width=True):
+                    if st.button("Leggi Privacy", key="auth_read_privacy", width="stretch"):
                         _go_public("privacy")
                 with legal_col_3:
-                    if st.button("Cookie", key="auth_read_cookies", use_container_width=True):
+                    if st.button("Cookie", key="auth_read_cookies", width="stretch"):
                         _go_public("cookies")
-                if st.button("Crea account", key="auth_signup_btn", use_container_width=True, type="primary"):
+                if st.button("Crea account", key="auth_signup_btn", width="stretch", type="primary"):
                     _do_signup(
                         client,
                         signup_email,
@@ -1729,7 +1729,7 @@ def _render_auth_panel(client, view: str):
                         terms_accepted=terms_ok,
                         marketing_accepted=marketing_ok,
                     )
-                if st.button("Hai già un account? Accedi", key="register_to_login", use_container_width=True):
+                if st.button("Hai già un account? Accedi", key="register_to_login", width="stretch"):
                     _go_public("login")
 
             auth_label = "Supabase" if client else "sviluppo locale"
@@ -1744,7 +1744,7 @@ def _render_auth_panel(client, view: str):
                 )
             else:
                 st.caption(f"Auth {auth_label}. Dopo la registrazione completerai la prima proprietà.")
-            if st.button("Torna alla home", key="auth_back_home", use_container_width=True):
+            if st.button("Torna alla home", key="auth_back_home", width="stretch"):
                 _go_public("landing")
 
 
@@ -1779,19 +1779,19 @@ def _render_legal_page(view: str):
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            if st.button(back_label, key=f"legal_{view}_register", use_container_width=True, type="primary"):
+            if st.button(back_label, key=f"legal_{view}_register", width="stretch", type="primary"):
                 _go_public("register")
         with c2:
-            if st.button("Torna alla home", key=f"legal_{view}_home", use_container_width=True):
+            if st.button("Torna alla home", key=f"legal_{view}_home", width="stretch"):
                 _go_public("landing")
         with c3:
-            if st.button("Termini", key=f"legal_{view}_terms", use_container_width=True):
+            if st.button("Termini", key=f"legal_{view}_terms", width="stretch"):
                 _go_public("terms")
         with c4:
-            if st.button("Privacy", key=f"legal_{view}_privacy", use_container_width=True):
+            if st.button("Privacy", key=f"legal_{view}_privacy", width="stretch"):
                 _go_public("privacy")
         if view != "cookies":
-            if st.button("Leggi Cookie e tracking", key=f"legal_{view}_cookies", use_container_width=True):
+            if st.button("Leggi Cookie e tracking", key=f"legal_{view}_cookies", width="stretch"):
                 _go_public("cookies")
 
 
