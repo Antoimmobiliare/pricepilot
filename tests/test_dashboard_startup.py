@@ -44,3 +44,14 @@ class DashboardStartupTests(unittest.TestCase):
                 with self.subTest(section=label):
                     app.radio(key='pp_main_section_label').set_value(label).run(timeout=30)
                     self.assertEqual(len(app.exception), 0, str(app.exception))
+
+    def test_empty_account_has_direct_property_onboarding_cta(self):
+        with patch.dict(os.environ, {'PRICEPILOT_AUTH_MODE': 'disabled'}):
+            app = AppTest.from_file(str(APP)).run(timeout=30)
+            cta = next(
+                button for button in app.button
+                if button.label == 'Aggiungi il primo appartamento'
+            )
+            cta.click().run(timeout=30)
+            self.assertEqual(app.radio(key='pp_main_section_label').value, '🏡 Proprietà')
+            self.assertEqual(len(app.exception), 0, str(app.exception))

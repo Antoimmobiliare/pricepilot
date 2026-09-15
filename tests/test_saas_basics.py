@@ -256,6 +256,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self.assertEqual(effective_sync_mode("free", "auto"), "advisory")
         self.assertEqual(effective_sync_mode("plus", "auto"), "approval")
         self.assertEqual(effective_sync_mode("pro", "approval"), "approval")
+        self.assertEqual(effective_sync_mode("pro", "auto"), "approval")
 
         free_account = self._account("free", "Free Host")
         self._property(free_account, "Free Apt 1")
@@ -303,7 +304,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self.assertTrue(result["decision"].startswith("PENDING_APPROVAL"))
         self.assertEqual(result["calendar_status"], "pending_approval")
 
-    def test_pro_auto_applies_only_when_guardrails_allow_it(self):
+    def test_pro_requires_approval_before_channel_write(self):
         account = self._account("pro", "Pro Decision")
         prop = self._property(account)
 
@@ -316,10 +317,11 @@ class PricePilotSaaSTestCase(unittest.TestCase):
             occupancy_source="test",
         )
 
-        self.assertEqual(ok_result["mode"], "auto")
-        self.assertTrue(ok_result["applied"])
-        self.assertTrue(ok_result["decision"].startswith("AUTO_APPLIED"))
-        self.assertEqual(ok_result["calendar_status"], "applied")
+        self.assertEqual(ok_result["requested_mode"], "approval")
+        self.assertEqual(ok_result["mode"], "approval")
+        self.assertFalse(ok_result["applied"])
+        self.assertTrue(ok_result["decision"].startswith("PENDING_APPROVAL"))
+        self.assertEqual(ok_result["calendar_status"], "pending_approval")
 
         guarded_account = self._account("pro", "Guarded Pro")
         guarded_prop = self._property(guarded_account)
@@ -336,12 +338,11 @@ class PricePilotSaaSTestCase(unittest.TestCase):
             occupancy_source="test",
         )
 
-        self.assertEqual(guarded_result["requested_mode"], "auto")
+        self.assertEqual(guarded_result["requested_mode"], "approval")
         self.assertEqual(guarded_result["mode"], "approval")
         self.assertFalse(guarded_result["applied"])
-        self.assertIn("auto_disabled_by_policy", guarded_result["guardrail_reasons"])
 
-    def test_pro_requires_real_market_data_before_autopilot(self):
+    def test_pro_remains_approval_without_market_provider(self):
         set_market_data_provider(UnconfiguredCompetitorProvider())
         account = self._account("pro", "Pro Without Competitors")
         prop = self._property(account)
@@ -355,10 +356,9 @@ class PricePilotSaaSTestCase(unittest.TestCase):
             occupancy_source="test",
         )
 
-        self.assertEqual(result["requested_mode"], "auto")
+        self.assertEqual(result["requested_mode"], "approval")
         self.assertEqual(result["mode"], "approval")
         self.assertFalse(result["applied"])
-        self.assertIn("market_data_provider_not_configured", result["guardrail_reasons"])
 
     def test_scheduler_resolves_events_for_the_specific_property(self):
         event_provider = PropertyEventProvider()

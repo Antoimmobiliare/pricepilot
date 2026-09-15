@@ -180,7 +180,7 @@ class ClientProtocolTests(unittest.TestCase):
             self.assertEqual(effective_sync_mode(plan, None), 'advisory')
         self.assertEqual(effective_sync_mode('plus', 'auto'), 'approval')
         self.assertEqual(effective_sync_mode('pro', 'approval'), 'approval')
-        self.assertEqual(effective_sync_mode('pro', 'auto'), 'auto')
+        self.assertEqual(effective_sync_mode('pro', 'auto'), 'approval')
 
     def test_pagination_flag_must_be_boolean(self):
         def handle(request):

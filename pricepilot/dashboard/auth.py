@@ -70,8 +70,8 @@ LEGAL_DOCUMENTS = {
                 "2. Piani e livello di automazione",
                 "Il piano Free fornisce suggerimenti e richiede aggiornamento manuale sulle OTA. Il piano Plus "
                 "aggiunge approvazione Telegram e applicazione automatica dopo conferma quando il channel manager "
-                "è collegato. Il piano Pro abilita l'autopilot completo con guardrail e report, sempre nei limiti "
-                "delle integrazioni disponibili.",
+                "è collegato. Nel flusso operativo attuale anche il piano Pro mantiene l'approvazione esplicita "
+                "prima di ogni invio, con più proprietà, guardrail e report.",
             ),
             (
                 "3. Responsabilità dell'utente",
@@ -1005,9 +1005,9 @@ def _render_landing_page():
             _go_public("register", "free")
         st.markdown(
             '<div class="pp-proof-row">'
-            '<span class="pp-proof"><strong>6h</strong> market refresh</span>'
+            '<span class="pp-proof"><strong>6h</strong> analisi calendario</span>'
             '<span class="pp-proof"><strong>Plus</strong> Telegram approval</span>'
-            '<span class="pp-proof"><strong>Pro</strong> autopilot OTA</span>'
+            '<span class="pp-proof"><strong>Pro</strong> portfolio e report</span>'
             '<span class="pp-proof">Multi property ready</span>'
             '</div>',
             unsafe_allow_html=True,
@@ -1062,7 +1062,7 @@ def _render_dashboard_mockup():
       </div>
       <div class="pp-product-grid" style="margin-top:10px">
         <div class="pp-shot-panel dark">
-          <div class="pp-shot-label">Revenue forecast</div>
+          <div class="pp-shot-label">Storico occupazione</div>
           <div class="pp-bars-clean">
             <i style="height:38%"></i>
             <i class="brick" style="height:54%"></i>
@@ -1072,9 +1072,9 @@ def _render_dashboard_mockup():
             <i class="brick" style="height:92%"></i>
           </div>
           <div class="pp-table-clean" style="margin-top:16px">
-            <div class="pp-row-clean"><span>Competitor A</span><b>&euro;168</b><span>+9%</span></div>
-            <div class="pp-row-clean"><span>Competitor B</span><b>&euro;151</b><span>-2%</span></div>
-            <div class="pp-row-clean"><span>Competitor C</span><b>&euro;181</b><span>+17%</span></div>
+            <div class="pp-row-clean"><span>Pickup 7 giorni</span><b>4 notti</b><span>Letto</span></div>
+            <div class="pp-row-clean"><span>Vuoto breve</span><b>2 notti</b><span>Verificato</span></div>
+            <div class="pp-row-clean"><span>Weekend</span><b>+10%</b><span>Regola</span></div>
           </div>
         </div>
         <div class="pp-telegram-clean">
@@ -1087,9 +1087,9 @@ def _render_dashboard_mockup():
       </div>
       <div class="pp-ops-grid">
         <div class="pp-shot-panel">
-          <div class="pp-shot-label">Market analytics & price history</div>
-          <div class="pp-sync-row"><span>Market pulse</span><b>Alta domanda</b></div>
-          <div class="pp-sync-row"><span>Confidence</span><b>92%</b></div>
+          <div class="pp-shot-label">Calendario e storico prezzi</div>
+          <div class="pp-sync-row"><span>Occupazione</span><b>81%</b></div>
+          <div class="pp-sync-row"><span>Pickup 7 giorni</span><b>4 notti</b></div>
           <div class="pp-history-line">
             <i style="height:28%"></i><i style="height:34%"></i><i class="brick" style="height:49%"></i>
             <i style="height:44%"></i><i class="brick" style="height:68%"></i><i class="brick" style="height:86%"></i>
@@ -1097,10 +1097,10 @@ def _render_dashboard_mockup():
           </div>
         </div>
         <div class="pp-shot-panel dark">
-          <div class="pp-shot-label">OTA sync & automation log</div>
-          <div class="pp-sync-row dark"><span>Airbnb</span><span class="pp-mini-status">Synced</span></div>
-          <div class="pp-sync-row dark"><span>Booking.com</span><span class="pp-mini-status">Queued</span></div>
-          <div class="pp-log-item"><b>09:00 pricing cycle</b>23 decisioni generate, 19 pronte per sync.</div>
+          <div class="pp-shot-label">Beds24 e registro invii</div>
+          <div class="pp-sync-row dark"><span>Calendario</span><span class="pp-mini-status">Aggiornato</span></div>
+          <div class="pp-sync-row dark"><span>Proposte</span><span class="pp-mini-status">Da approvare</span></div>
+          <div class="pp-log-item"><b>09:00 ciclo prezzi</b>23 date controllate, 4 proposte da valutare.</div>
           <div class="pp-log-item"><b>09:04 guardrail check</b>Nessun prezzo fuori range commerciale.</div>
         </div>
       </div>
@@ -1169,14 +1169,14 @@ def _render_social_proof_section():
           <h3 class="pp-proof-title">Pensato per host singoli, property manager e portfolio in crescita.</h3>
         </div>
         <div class="pp-live-status">
-          <span class="pp-status-chip"><i class="pp-status-dot"></i>Live market monitor</span>
-          <span class="pp-status-chip"><i class="pp-status-dot"></i>OTA-ready</span>
+          <span class="pp-status-chip"><i class="pp-status-dot"></i>Calendario verificabile</span>
+          <span class="pp-status-chip"><i class="pp-status-dot"></i>Beds24-ready</span>
           <span class="pp-status-chip"><i class="pp-status-dot"></i>Guardrail attivi</span>
         </div>
       </div>
       <div class="pp-logo-wall">
-        <span>Airbnb</span><span>Booking.com</span><span>Vrbo</span><span>Hostaway</span>
-        <span>Guesty</span><span>Beds24</span><span>Smoobu</span><span>Lodgify</span>
+        <span>Airbnb via Beds24</span><span>Booking.com via Beds24</span>
+        <span>Vrbo via Beds24</span><span>Sito diretto via Beds24</span>
       </div>
       <div class="pp-proof-metrics">
         <div><b>6h</b><span>ciclo di analisi calendario configurabile</span></div>
@@ -1229,7 +1229,7 @@ def _render_features_section():
         </div>
       </div>
       <div class="pp-mini-shot">
-        <div class="pp-shot-label">Market position</div>
+        <div class="pp-shot-label">Regole della data</div>
         <div class="pp-mini-shot-grid">
           <div class="pp-mini-card"><small>Tu</small><b>&euro;145</b></div>
           <div class="pp-mini-card"><small>Riferimento</small><b>&euro;158</b></div>
@@ -1240,8 +1240,8 @@ def _render_features_section():
     </section>
     <section class="pp-feature-row reverse">
       <div class="pp-feature-copy">
-        <div class="pp-feature-kicker">Occupancy & stagionalità</div>
-        <h2>Prezzi sensibili alla domanda reale.</h2>
+        <div class="pp-feature-kicker">Occupazione e stagionalità</div>
+        <h2>Prezzi coerenti con il tuo calendario.</h2>
         <p>Anticipo, weekend, occupazione e piccoli vuoti tra prenotazioni attivano solo le regole che hai salvato, entro limiti controllati.</p>
         <div class="pp-feature-points">
           <span>Ricalcolo periodico ogni 6 ore</span>
@@ -1250,7 +1250,7 @@ def _render_features_section():
         </div>
       </div>
       <div class="pp-mini-shot dark">
-        <div class="pp-shot-label">Demand curve</div>
+        <div class="pp-shot-label">Segnali del calendario</div>
         <div class="pp-bars-clean">
           <i style="height:32%"></i><i style="height:46%"></i><i class="brick" style="height:70%"></i><i class="brick" style="height:88%"></i><i style="height:58%"></i>
         </div>
@@ -1282,12 +1282,12 @@ def _render_features_section():
     </section>
     <section class="pp-feature-row reverse">
       <div class="pp-feature-copy">
-        <div class="pp-feature-kicker">Autopilot & analytics</div>
-        <h2>Dal consiglio alla gestione automatica.</h2>
-        <p>Il piano Pro applica i cambi prezzo rispettando guardrail e invia un riepilogo decisionale. Tu vedi cosa è successo, perché e con quale impatto stimato.</p>
+        <div class="pp-feature-kicker">Portfolio e controllo</div>
+        <h2>Più proprietà, con la stessa approvazione prudente.</h2>
+        <p>Il piano Pro amplia portfolio e report mantenendo la tua approvazione prima dell'invio. Tu vedi cosa è stato proposto, perché e quale esito ha avuto.</p>
         <div class="pp-feature-points">
-          <span>Autopilot con limiti di sicurezza</span>
-          <span>Revenue forecast e storico decisioni</span>
+          <span>Approvazione con limiti di sicurezza</span>
+          <span>KPI reali e storico decisioni</span>
           <span>Gestione multi proprietà per portfolio più grandi</span>
         </div>
       </div>
@@ -1352,8 +1352,8 @@ def _render_how_it_works_section():
         </div>
         <div class="pp-time-step">
           <strong>3</strong>
-          <h3>Approvi o automatizzi</h3>
-          <p>Free suggerisce. Plus chiede conferma da Telegram. Pro lavora in autopilot con report.</p>
+          <h3>Approvi e invii</h3>
+          <p>Free suggerisce. Plus approva e invia tramite Beds24. Pro aggiunge portfolio e report mantenendo l'approvazione.</p>
         </div>
       </div>
     </section>
@@ -1392,9 +1392,9 @@ def _render_how_it_works_section():
 def _render_pricing_section():
     st.markdown('<span id="prezzi"></span>', unsafe_allow_html=True)
     st.markdown(
-        '<section class="pp-section"><h2>Piani chiari per ogni livello di automazione.</h2>'
+        '<section class="pp-section"><h2>Piani chiari per ogni livello di gestione.</h2>'
         '<p class="pp-section-lead">Free ti aiuta a decidere. Plus ti fa approvare da Telegram. '
-        'Pro lascia lavorare PricePilot in autonomia con report e guardrail.</p></section>',
+        'Pro aggiunge più proprietà e report mantenendo l approvazione prima dell invio.</p></section>',
         unsafe_allow_html=True,
     )
     annual = st.toggle("Mostra prezzo annuale", value=False, key="public_pricing_annual")
@@ -1427,11 +1427,11 @@ def _render_pricing_section():
         cols[2],
         "pro",
         pro_price,
-        "Full autopilot",
-        "PricePilot aggiorna automaticamente i prezzi e invia report decisionali.",
-        ["Fino a 25 proprietà", "Tutto del Plus", "Autopilot completo", "Report Telegram", "Supporto prioritario"],
+        "Portfolio controllato",
+        "Gestisci più proprietà, approva ogni cambio e ricevi report decisionali.",
+        ["Fino a 25 proprietà", "Tutto del Plus", "Approvazione obbligatoria", "Report Telegram", "Supporto prioritario"],
         "Scegli Pro",
-        mode="Fa tutto",
+        mode="Approvi, gestisci e analizzi",
     )
     return
     st.markdown('<span id="prezzi"></span>', unsafe_allow_html=True)
@@ -1516,11 +1516,11 @@ def _render_faq_section():
         unsafe_allow_html=True,
     )
     with st.expander("PricePilot cambia già i prezzi sulle OTA?"):
-        st.write("Free no: ricevi suggerimenti e aggiorni manualmente. Plus applica dopo approvazione Telegram. Pro applica automaticamente quando le integrazioni OTA/channel manager sono collegate.")
+        st.write("Free richiede l'aggiornamento manuale. Plus e Pro possono inviare il prezzo a Beds24 soltanto dopo la tua approvazione e quando il collegamento è stato collaudato.")
     with st.expander("Come funziona Telegram approval?"):
         st.write("Ricevi prezzo attuale, prezzo suggerito e motivazione. Approvi o rifiuti con un click, senza aprire la dashboard.")
     with st.expander("Airbnb, Booking e channel manager sono supportati?"):
-        st.write("PricePilot è progettato per lavorare con OTA e channel manager tramite API/PMS. La landing mostra il flusso previsto; le integrazioni reali si collegano tramite provider.")
+        st.write("PricePilot si collega a Beds24. È Beds24 a sincronizzare calendario e prezzi con le OTA configurate; ogni canale va verificato separatamente durante il collaudo.")
     with st.expander("Posso usarlo con una sola proprietà?"):
         st.write("Sì. Il piano Free è pensato per partire con una proprietà e capire subito come PricePilot ragiona sui prezzi.")
     with st.expander("Ogni quanto analizza il calendario?"):
@@ -1549,7 +1549,7 @@ def _render_final_cta_section():
     st.markdown(
         '<section class="pp-final-cta">'
         '<h2>Revenue management professionale, senza complessita.</h2>'
-        '<p>Parti con i suggerimenti. Passa all approvazione Telegram o all autopilot quando vuoi automatizzare davvero.</p>'
+        '<p>Parti con i suggerimenti. Collega Beds24 e Telegram quando vuoi approvare e inviare i prezzi mantenendo il controllo.</p>'
         '</section>',
         unsafe_allow_html=True,
     )

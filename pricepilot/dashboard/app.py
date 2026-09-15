@@ -228,6 +228,8 @@ def reset_account_scoped_state_if_needed():
         "notif_quiet_end",
         "cal_selected_day",
         "cal_day_input",
+        "decision_export_csv",
+        "decision_export_json",
     }
     prefixes = (
         "prop_step_",
@@ -3368,7 +3370,7 @@ def tab_home(cfg: dict):
                         "source": "dashboard",
                         "payload": result,
                     })
-                    st.toast("Approvato. Aggiorna manualmente il prezzo sul canale.", icon="✅")
+                    _show_approval_feedback(result)
                     st.rerun()
             with col_reject:
                 if st.button("❌ NO", key=f"home_rej_{item['id']}",
@@ -4309,6 +4311,30 @@ def _decision_prop_name(decision: dict, prop_map: dict[int, str]) -> str:
         return "Proprietà"
 
 
+def _approval_feedback(result: dict | None) -> tuple[str, str]:
+    """Traduci l'esito operativo senza promettere una sync non avvenuta."""
+    result = result or {}
+    message = str(result.get("message") or "").strip()
+    status = str(result.get("status") or "").strip().lower()
+    if bool(result.get("applied")):
+        return "success", message or "Prezzo approvato e inviato al channel manager."
+    if status in {"approved_sync_failed", "sync_failed"}:
+        return "error", message or "Approvazione registrata, ma l'invio al channel manager non è riuscito."
+    if bool(result.get("approved")):
+        return "warning", message or "Approvazione registrata; il prezzo non è stato ancora inviato."
+    return "error", message or "Impossibile approvare questa decisione."
+
+
+def _show_approval_feedback(result: dict | None) -> None:
+    level, message = _approval_feedback(result)
+    if level == "success":
+        st.toast(message, icon="✅")
+    elif level == "warning":
+        st.toast(message, icon="⚠️")
+    else:
+        st.toast(message, icon="❌")
+
+
 def _render_decision_flow_card(
     decision: dict,
     prop_map: dict[int, str],
@@ -4410,10 +4436,7 @@ def _render_decision_flow_card(
                     "source": "dashboard",
                     "payload": result,
                 })
-                if result.get("approved"):
-                    st.toast("Decisione approvata. Ora resta in attesa di sync OTA.", icon="✅")
-                else:
-                    st.error(result.get("message", "Impossibile approvare questa decisione."))
+                _show_approval_feedback(result)
                 st.rerun()
         with col_no:
             if st.button("Rifiuta", key=f"{key_prefix}_reject_{decision_id}", width="stretch"):
@@ -4513,9 +4536,9 @@ def _tab_decisions_v2(cfg: dict):
         st.markdown(
             '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
             'padding:12px 14px;margin:10px 0 14px;color:#475569;font-size:.88rem">'
-            '<b>Come leggerla:</b> Free genera consigli, Plus crea decisioni da approvare, '
-            "Pro prepara l'autopilot. Finché non colleghiamo channel manager/API, tutto ciò che "
-            'è approvato ma non applicato resta in "Da sincronizzare".'
+            '<b>Come leggerla:</b> Free genera consigli; Plus e Pro creano decisioni da approvare. '
+            "Finché Beds24 non è collegato, tutto ciò che è approvato ma non applicato "
+            'resta in "Da sincronizzare".'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -4568,12 +4591,44 @@ def _tab_decisions_v2(cfg: dict):
         if st.button("Esporta CSV", width="stretch", key="decision_flow_export_csv"):
             path = export_csv(account_id=account_id)
             if path:
-                st.success(f"Esportato: `{path}`")
+                export_path = Path(path)
+                st.session_state["decision_export_csv"] = {
+                    "name": export_path.name,
+                    "data": export_path.read_bytes(),
+                }
+            else:
+                st.info("Nessuna decisione da esportare.")
+        csv_export = st.session_state.get("decision_export_csv")
+        if csv_export:
+            st.download_button(
+                "Scarica CSV",
+                data=csv_export["data"],
+                file_name=csv_export["name"],
+                mime="text/csv",
+                width="stretch",
+                key="decision_flow_download_csv",
+            )
     with e2:
         if st.button("Esporta JSON", width="stretch", key="decision_flow_export_json"):
             path = export_json(account_id=account_id)
             if path:
-                st.success(f"Esportato: `{path}`")
+                export_path = Path(path)
+                st.session_state["decision_export_json"] = {
+                    "name": export_path.name,
+                    "data": export_path.read_bytes(),
+                }
+            else:
+                st.info("Nessuna decisione da esportare.")
+        json_export = st.session_state.get("decision_export_json")
+        if json_export:
+            st.download_button(
+                "Scarica JSON",
+                data=json_export["data"],
+                file_name=json_export["name"],
+                mime="application/json",
+                width="stretch",
+                key="decision_flow_download_json",
+            )
 
 
 def tab_decisions(cfg: dict):
@@ -6750,44 +6805,28 @@ def tab_telegram():
         else:
             # ── Non collegato: bottone "Collega Telegram" ─────────────────────
             with col_a:
-                st.caption("Clicca il pulsante per generare il link di connessione Telegram.")
+                if bot_ready:
+                    st.caption("Clicca il pulsante per generare il link di connessione Telegram.")
+                else:
+                    st.warning("Bot Telegram non configurato sul server. Il collegamento non è ancora disponibile.")
             with col_b:
                 connect_btn = st.button(
                     "📱 Connetti Telegram",
                     key=f"conn_{prop_id}",
                     width="stretch",
                     type="primary",
+                    disabled=not bot_ready,
                 )
 
             if connect_btn:
                 with st.spinner("Generazione link..."):
                     try:
-                        # Prova prima con il modulo bot (se configurato)
-                        if bot_ready and create_property_link:
-                            li = create_property_link(prop_id)
-                        else:
-                            # Fallback: genera il token direttamente senza bot token
-                            import secrets as _sec
-                            _token = f"connect_{prop_id}_{_sec.token_hex(8)}"
-                            from pricepilot.core.database import (
-                                revoke_telegram_link as _rev,
-                                save_telegram_link   as _stl,
+                        if not bot_ready or not create_property_link:
+                            raise RuntimeError(
+                                "Bot Telegram non configurato sul server. "
+                                "Completa la configurazione prima di generare il link."
                             )
-                            _rev(prop_id)
-                            _lid = _stl({
-                                "property_id": prop_id,
-                                "token":       _token,
-                                "active":      1,
-                            })
-                            _bot_user = os.environ.get(
-                                "TELEGRAM_BOT_USERNAME", "PricePilotBot"
-                            ).strip().lstrip("@")
-                            li = {
-                                "link_id":     _lid,
-                                "token":       _token,
-                                "deep_link":   f"https://t.me/{_bot_user}?start={_token}",
-                                "property_id": prop_id,
-                            }
+                        li = create_property_link(prop_id)
                         st.session_state[f"tg_link_{prop_id}"] = li
                     except Exception as exc:
                         st.error(f"Errore nella generazione del link: {exc}")
@@ -6893,7 +6932,7 @@ def tab_telegram():
                         "source": "dashboard",
                         "payload": result,
                     })
-                    st.toast("Approvato. Aggiorna manualmente il prezzo sul canale.", icon="✅")
+                    _show_approval_feedback(result)
                     st.rerun()
             with cc:
                 if st.button("❌", key=f"rej_{p['id']}", help="Rifiuta", width="stretch"):
@@ -7188,11 +7227,11 @@ Dopo aver aggiunto le credenziali nel file `.env`:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def tab_auto_log():
-    st.markdown('<div class="section-title">🤖 Auto Apply – Storico Prezzi Applicati</div>',
+    st.markdown('<div class="section-title">📤 Registro invii prezzi</div>',
                 unsafe_allow_html=True)
     st.markdown(
-        "Storico dei prezzi applicati automaticamente dalla modalità **🤖 Auto Apply**. "
-        "I record con badge 🟡 Sim. sono stati simulati (non inviati alla piattaforma reale)."
+        "Storico dei tentativi di invio al channel manager dopo l'approvazione. "
+        "I record di test sono distinti dagli invii reali."
     )
 
     props = _cached_properties_for_account(current_account_id())
@@ -7213,7 +7252,7 @@ def tab_auto_log():
     with col_f2:
         filter_mode = st.selectbox(
             "Tipo aggiornamento",
-            ["Tutti", "🟢 Reale", "🟡 Simulato"],
+            ["Tutti", "🟢 Reale", "🟡 Test"],
             key="alog_mode",
         )
     with col_f3:
@@ -7247,9 +7286,8 @@ def tab_auto_log():
 
     if not rows:
         st.markdown(
-            '<div class="alert-blue">ℹ️ Nessun aggiornamento automatico registrato. '
-            'Diventa attivo quando una proprietà in modalità <b>🤖 Auto</b> '
-            'esegue la prima decisione.</div>',
+            '<div class="alert-blue">ℹ️ Nessun invio prezzo registrato. '
+            'Il registro si popola dopo una proposta approvata e un tentativo di invio al channel manager.</div>',
             unsafe_allow_html=True,
         )
         return
@@ -7261,7 +7299,7 @@ def tab_auto_log():
         df = df[df["property_name"] == filter_prop]
     if filter_mode == "🟢 Reale":
         df = df[df["is_stub"] == 0]
-    elif filter_mode == "🟡 Simulato":
+    elif filter_mode == "🟡 Test":
         df = df[df["is_stub"] == 1]
 
     if df.empty:
@@ -7270,9 +7308,9 @@ def tab_auto_log():
 
     # ── KPI rapide ────────────────────────────────────────────────────────────
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📦 Aggiornamenti totali", len(df))
+    k1.metric("📦 Invii totali", len(df))
     k2.metric("🟢 Reali",     int((df["is_stub"] == 0).sum()))
-    k3.metric("🟡 Simulati",  int((df["is_stub"] == 1).sum()))
+    k3.metric("🟡 Test",      int((df["is_stub"] == 1).sum()))
     k4.metric("💰 Prezzo medio", f"€{df['new_price'].mean():.2f}" if not df.empty else "—")
 
     st.markdown("---")
@@ -7301,7 +7339,7 @@ def tab_auto_log():
         type_badge = (
             '<span class="badge-green">🟢 Reale</span>'
             if is_live else
-            '<span class="badge-yellow">🟡 Simulato</span>'
+            '<span class="badge-yellow">🟡 Test</span>'
         )
         ok_badge = (
             '<span class="badge-green">✅ OK</span>'
@@ -7540,7 +7578,7 @@ def main():
         ("decisions", "\U0001f4cb Decisioni"),
         ("telegram", "\U0001f514 Telegram"),
         ("integrations", "\U0001f50c Integrazioni"),
-        ("auto_apply", "\U0001f916 Registro aggiornamenti"),
+        ("auto_apply", "\U0001f4e4 Registro invii"),
     ]
     nav_labels = [label for _, label in nav_items]
     nav_label_to_key = {label: key for key, label in nav_items}

@@ -60,24 +60,24 @@ PLAN_DEFINITIONS: Dict[str, Dict] = {
     },
     PLAN_PRO: {
         "label": "Pro",
-        "sync_mode": "auto",
+        "sync_mode": "approval",
         "max_properties": 25,
         "analysis_interval_hours": 6,
         "competitor_limit": 12,
         "telegram_recommendations": True,
-        "telegram_approval": False,
+        "telegram_approval": True,
         "ota_sync": True,
-        "auto_apply": True,
+        "auto_apply": False,
         "features": {
             "pricing_cycle": True,
             "telegram_recommendations": True,
-            "telegram_approval": False,
+            "telegram_approval": True,
             "ota_sync": True,
-            "auto_apply": True,
+            "auto_apply": False,
             "audit_log": True,
             "advanced_guardrails": True,
         },
-        "description": "Autopilot completo con report e notifiche operative.",
+        "description": "Portfolio, report e invio OTA dopo approvazione esplicita.",
     },
 }
 
@@ -104,8 +104,8 @@ def effective_sync_mode(plan: str | None, requested_mode: str | None = None) -> 
     """
     Returns the runtime mode allowed by the plan.
 
-    Free is intentionally forced to advisory. Plus and Pro map to the intended
-    product behavior even if OTA sync is still a future integration.
+    Free is intentionally forced to advisory. Plus and Pro require approval
+    before an OTA update, even when the channel manager is connected.
     """
     key = normalize_plan(plan)
     if key == PLAN_FREE:
@@ -113,6 +113,6 @@ def effective_sync_mode(plan: str | None, requested_mode: str | None = None) -> 
     requested = requested_mode or "advisory"
     if requested not in {"advisory", "approval", "auto"}:
         raise ValueError("Modalita pricing sconosciuta.")
-    if key == PLAN_PLUS:
+    if key in {PLAN_PLUS, PLAN_PRO}:
         return "advisory" if requested == "advisory" else "approval"
-    return requested
+    return "advisory"

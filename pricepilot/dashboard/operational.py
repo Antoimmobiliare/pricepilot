@@ -137,12 +137,23 @@ def _calendar_table(rows):
     return frame[columns].rename(columns=fields)
 
 
+def _open_properties_section():
+    st.session_state["pp_main_section_label"] = "🏡 Proprietà"
+
+
 def render(account_id, section, property_id=None):
     titles = {"home": "Stato operativo", "calendar": "Calendario e tariffe",
               "analytics": "Risultati dell’alloggio", "pricing": "Proposte di prezzo"}
     st.subheader(titles[section])
     if not property_id:
         st.info("Aggiungi o seleziona un appartamento per visualizzare i dati operativi.")
+        st.button(
+            "Aggiungi il primo appartamento",
+            type="primary",
+            width="stretch",
+            key=f"operational_add_first_property_{section}",
+            on_click=_open_properties_section,
+        )
         return
     occupancy = get_occupancy_provider()
     source_ready = "unconfigured" not in occupancy.name
