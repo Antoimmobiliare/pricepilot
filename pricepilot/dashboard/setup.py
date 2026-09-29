@@ -264,20 +264,21 @@ def render_integrations(account_id, property_id=None):
         external = a.number_input('ID proprietà Beds24', min_value=0, value=int(mapping.get('beds24_property_id') or 0), step=1)
         room = b.number_input('ID alloggio Beds24', min_value=0, value=int(mapping.get('room_id') or 0), step=1)
         slot = c.number_input('Piano tariffario Beds24 (1–16)', min_value=1, max_value=16, value=int(mapping.get('price_slot') or 1), step=1)
-        st.caption('Inseriremo gli ID dopo la creazione dell’alloggio in Beds24. La valuta gestita da questo collegamento è EUR.')
+        currency = st.selectbox('Valuta', ['EUR'], index=0, help='Luma Pisa opera in euro. La selezione resta esplicita nel mapping Beds24.')
+        st.caption('Inseriremo gli ID dopo la creazione dell’alloggio in Beds24. Il mapping salva proprietà, alloggio, piano tariffario, valuta e soltanto i riferimenti alle variabili segrete.')
         confirmed_basis = st.checkbox('Ho verificato che l’importo prenotazione Beds24 contiene solo il pernottamento, senza pulizia e tasse',
                                        value=mapping.get('price_basis') == 'accommodation_only')
         st.caption('ADR e RevPAR restano non disponibili finché la composizione degli importi non è verificata.')
         enabled = st.checkbox('Abilita questo collegamento', value=bool(mapping.get('enabled', False)))
         with st.expander('Configurazione credenziali sul server'):
             st.caption('Questi campi indicano i nomi delle credenziali installate sul server. Non inserire qui chiavi API o password.')
-            token_name = st.text_input('Nome credenziale accesso', value=mapping.get('token_env', f'BEDS24_{account_id}_{prop["id"]}_TOKEN'))
-            refresh_name = st.text_input('Nome credenziale rinnovo', value=mapping.get('refresh_token_env', f'BEDS24_{account_id}_{prop["id"]}_REFRESH_TOKEN'))
+            token_name = st.text_input('Nome variabile token Beds24', value=mapping.get('token_env', 'BEDS24_LUMA_TOKEN'))
+            refresh_name = st.text_input('Nome variabile refresh token Beds24', value=mapping.get('refresh_token_env', 'BEDS24_LUMA_REFRESH_TOKEN'))
         if st.form_submit_button('Salva collegamento', type='primary'):
             try:
                 save_connection(account_id, prop['id'], {'provider': 'beds24', 'enabled': enabled,
                     'beds24_property_id': int(external) or None, 'room_id': int(room) or None,
-                    'price_slot': int(slot), 'currency': 'EUR',
+                    'price_slot': int(slot), 'currency': currency,
                     'token_env': token_name.strip(), 'refresh_token_env': refresh_name.strip(),
                     'price_basis': 'accommodation_only' if confirmed_basis else 'unknown'})
                 st.cache_data.clear()

@@ -12,6 +12,7 @@ from pricepilot.core.database import (
 from pricepilot.core.data_backend import is_supabase_primary
 from pricepilot.models.property import Property, SYNC_MODES, PLATFORMS
 from pricepilot.core.plans import PLANS, effective_sync_mode, get_plan_limit, normalize_plan
+from pricepilot.core.operational_mode import operational_mode_enabled, operational_plan
 from pricepilot.services.supabase_repository import (
     backfill_account_properties_to_supabase,
     delete_property_from_supabase,
@@ -123,7 +124,11 @@ def _validate(data: Dict) -> None:
         raise ValueError("Il nome della proprietà è obbligatorio.")
     if data.get("sync_mode") and data["sync_mode"] not in SYNC_MODES:
         raise ValueError(f"sync_mode deve essere uno di: {SYNC_MODES}")
-    data["plan"] = normalize_plan(data.get("plan"))
+    if operational_mode_enabled():
+        data["plan"] = operational_plan()
+        data["sync_mode"] = "approval"
+    else:
+        data["plan"] = normalize_plan(data.get("plan"))
     if data["plan"] not in PLANS:
         raise ValueError(f"plan deve essere uno di: {PLANS}")
     data["sync_mode"] = effective_sync_mode(data["plan"], data.get("sync_mode"))
@@ -137,8 +142,8 @@ def _enforce_property_limit(data: Dict) -> None:
     account_id = int(data.get("account_id") or 1)
     account = get_account(account_id) or {"plan": data.get("plan", "free"), "billing_status": "dev"}
     billing_status = str(account.get("billing_status") or "dev").lower()
-    plan = account.get("plan") or data.get("plan", "free")
-    if billing_status not in {"active", "trialing", "dev"}:
+    plan = operational_plan() if operational_mode_enabled() else (account.get("plan") or data.get("plan", "free"))
+    if not operational_mode_enabled() and billing_status not in {"active", "trialing", "dev"}:
         plan = "free"
     max_properties = int(get_plan_limit(plan, "max_properties", 1))
     current_count = sum(

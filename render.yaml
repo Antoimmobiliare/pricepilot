@@ -17,6 +17,8 @@ services:
         value: unconfigured
       - key: PRICEPILOT_PRICING_BASIS
         value: calendar_only
+      - key: PRICEPILOT_OPERATIONAL_MODE
+        value: "1"
       - key: PRICEPILOT_OCCUPANCY_PROVIDER
         value: observed_inventory
       - key: PRICEPILOT_CHANNEL_PROVIDER

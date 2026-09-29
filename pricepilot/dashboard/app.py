@@ -29,6 +29,7 @@ from pricepilot.dashboard.auth import (
 
 from pricepilot.core.config import CONFIG, save_config, load_config
 from pricepilot.core.plans import effective_sync_mode, get_plan, normalize_plan
+from pricepilot.core.operational_mode import operational_mode_enabled, operational_plan
 from pricepilot.core.database import (
     init_db, save_decision, save_competitors,
     save_market_snapshot, get_decisions, get_summary_stats,
@@ -1933,7 +1934,7 @@ def _tab_onboarding_v2(surface: str = "main"):
     labels = {
         1: "Attività",
         2: "Proprietà",
-        3: "Piano",
+        3: "Conferma",
         4: "Telegram",
     }
     pct = {1: 25, 2: 50, 3: 75, 4: 100}[step]
@@ -2105,14 +2106,15 @@ def _tab_onboarding_v2(surface: str = "main"):
         elif step == 3:
             st.markdown(
                 '<div class="onb-step-label">Passo 3 di 4</div>'
-                '<div class="onb-title">Conferma il piano attivo</div>'
-                '<div class="onb-desc">Il piano viene letto dall&apos;account. In futuro sarà impostato dal pagamento, non dalla dashboard.</div>',
+                '<div class="onb-title">Conferma la configurazione</div>'
+                '<div class="onb-desc">PricePilot proporrà ogni variazione e richiederà sempre la tua approvazione prima di inviarla a Beds24.</div>',
                 unsafe_allow_html=True,
             )
 
-            plan = (account.get("plan") or "free").lower()
-            _render_readonly_plan_box(plan)
-            _render_billing_action(account_id, account, key_prefix=widget_key("onb_billing"))
+            plan = operational_plan() if operational_mode_enabled() else (account.get("plan") or "free").lower()
+            if not operational_mode_enabled():
+                _render_readonly_plan_box(plan)
+                _render_billing_action(account_id, account, key_prefix=widget_key("onb_billing"))
 
             b1, b2 = st.columns([1, 1])
             with b1:
@@ -2120,10 +2122,10 @@ def _tab_onboarding_v2(surface: str = "main"):
                     st.session_state[step_key] = 2
                     st.rerun()
             with b2:
-                cta = {
+                cta = "Crea la proprietà" if operational_mode_enabled() else {
                     "free": "Attiva consigli",
                     "plus": "Attiva approvazione",
-                    "pro": "Attiva autopilot",
+                    "pro": "Attiva approvazione",
                 }[plan]
                 if st.button(cta, type="primary", width="stretch", key=widget_key("onb_create_property")):
                     try:
@@ -2198,14 +2200,14 @@ def _tab_onboarding_v2(surface: str = "main"):
                         st.error(f"Errore durante la creazione: {exc}")
 
         elif step == 4:
-            plan = st.session_state.get("onb_plan", account.get("plan") or "free")
+            plan = operational_plan() if operational_mode_enabled() else st.session_state.get("onb_plan", account.get("plan") or "free")
             prop_id = st.session_state.get("onb_property_id") or st.session_state.get("active_prop_id")
             property_name = st.session_state.get("onb_property_name", "La tua proprietà")
             mode_text = {
                 "free": "ricevere consigli motivati",
                 "plus": "approvare le modifiche da Telegram",
                 "pro": "ricevere report e notifiche operative",
-            }.get(plan, "ricevere notifiche")
+            }.get(plan, "approvare le modifiche da Telegram")
 
             st.markdown(
                 '<div class="onb-step-label">Passo 4 di 4</div>'
@@ -2240,6 +2242,10 @@ def _tab_onboarding_v2(surface: str = "main"):
                     unsafe_allow_html=True,
                 )
 
+            plan_summary = "" if operational_mode_enabled() else (
+                f'<div class="onb-summary-row"><span class="onb-summary-label">Piano</span>'
+                f'<span class="onb-summary-value">{get_plan(plan)["label"]}</span></div>'
+            )
             st.markdown(
                 f'<div style="background:#f8fafc;border:1px solid #e2e8f0;'
                 f'border-radius:12px;padding:16px 18px;margin-top:12px">'
@@ -2247,8 +2253,7 @@ def _tab_onboarding_v2(surface: str = "main"):
                 f'<span class="onb-summary-value">{_html.escape(st.session_state.get("onb_business_name", account.get("name", "")))}</span></div>'
                 f'<div class="onb-summary-row"><span class="onb-summary-label">Proprietà</span>'
                 f'<span class="onb-summary-value">{_html.escape(property_name)}</span></div>'
-                f'<div class="onb-summary-row"><span class="onb-summary-label">Piano</span>'
-                f'<span class="onb-summary-value">{get_plan(plan)["label"]}</span></div>'
+                f'{plan_summary}'
                 f'<div class="onb-summary-row" style="border-bottom:none"><span class="onb-summary-label">Prezzi</span>'
                 f'<span class="onb-summary-value">€{st.session_state.get("onb_min_price", 0):.0f} - €{st.session_state.get("onb_max_price", 0):.0f}</span></div>'
                 f'</div>',
@@ -4462,7 +4467,7 @@ def _render_decision_flow_card(
                 st.toast("Decisione rifiutata.", icon="❌")
                 st.rerun()
         with col_note:
-            st.caption("Nel piano Plus l'approvazione arriva anche da Telegram. Se il channel manager non è configurato, la decisione resta pronta per l'aggiornamento manuale.")
+            st.caption("L'approvazione arriva anche da Telegram. Se Beds24 non è configurato, la decisione resta pronta per l'aggiornamento manuale.")
 
 
 def _render_decision_list(
@@ -4536,7 +4541,7 @@ def _tab_decisions_v2(cfg: dict):
         st.markdown(
             '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
             'padding:12px 14px;margin:10px 0 14px;color:#475569;font-size:.88rem">'
-            '<b>Come leggerla:</b> Free genera consigli; Plus e Pro creano decisioni da approvare. '
+            '<b>Come leggerla:</b> PricePilot crea decisioni da approvare. '
             "Finché Beds24 non è collegato, tutto ciò che è approvato ma non applicato "
             'resta in "Da sincronizzare".'
             '</div>',

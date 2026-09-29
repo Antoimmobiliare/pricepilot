@@ -94,6 +94,7 @@ def run_pricing_cycle(
         try_start_operation_run,
     )
     from pricepilot.core.plans import get_plan
+    from pricepilot.core.operational_mode import operational_mode_enabled, operational_plan
     from pricepilot.engine.decision_engine import process_decision
     from pricepilot.providers.registry import (
         get_billing_provider,
@@ -109,7 +110,7 @@ def run_pricing_cycle(
     d = start_date
     billing_provider = get_billing_provider()
     billing_plan = billing_provider.get_account_plan(account_id=account_id)
-    plan = get_plan(billing_plan.plan)
+    plan = get_plan(operational_plan() if operational_mode_enabled() else billing_plan.plan)
     effective_interval = float(plan.get("analysis_interval_hours") or interval_hours)
     next_run_at = (datetime.utcnow() + timedelta(hours=effective_interval)).isoformat()
     stale_after_minutes = max(30, int(effective_interval * 60 * 2))

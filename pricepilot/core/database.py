@@ -1058,6 +1058,9 @@ def delete_user(user_id: int) -> bool:
 
 def get_effective_plan_for_property(prop: Dict) -> str:
     """Piano account-first, con fallback al piano legacy salvato sulla proprieta."""
+    from pricepilot.core.operational_mode import operational_mode_enabled, operational_plan
+    if operational_mode_enabled():
+        return operational_plan()
     account = get_account(int(prop.get("account_id") or 1))
     if account:
         status = str(account.get("billing_status") or "dev").lower()

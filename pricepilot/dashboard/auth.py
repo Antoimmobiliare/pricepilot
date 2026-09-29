@@ -31,6 +31,7 @@ from pricepilot.core.database import (
     update_user,
 )
 from pricepilot.core.plans import get_plan, normalize_plan
+from pricepilot.core.operational_mode import operational_mode_enabled, operational_plan
 from pricepilot.core.data_backend import is_supabase_primary
 from pricepilot.core.supabase_client import get_supabase_client
 from pricepilot.services.account_service import create_account_owner
@@ -305,6 +306,8 @@ def _go_public(view: str, plan: str | None = None) -> None:
 
 
 def _selected_plan() -> str:
+    if operational_mode_enabled():
+        return operational_plan()
     return normalize_plan(st.session_state.get(_KEY_SELECTED_PLAN, "free"))
 
 
@@ -369,6 +372,8 @@ def _paid_signup_without_checkout_allowed() -> bool:
 
 
 def _account_plan_for_signup(plan: str | None) -> str:
+    if operational_mode_enabled():
+        return operational_plan()
     selected = normalize_plan(plan)
     if selected == "free" or _paid_signup_without_checkout_allowed():
         return selected
@@ -376,6 +381,8 @@ def _account_plan_for_signup(plan: str | None) -> str:
 
 
 def _signup_plan_requires_checkout(plan: str | None) -> bool:
+    if operational_mode_enabled():
+        return False
     selected = normalize_plan(plan)
     return selected != _account_plan_for_signup(selected)
 
@@ -971,20 +978,22 @@ def _render_public_nav():
         )
     with links_col:
         st.markdown(
-            '<div class="pp-nav-links">'
-            '<a href="#funzionalita">Funzionalità</a>'
-            '<a href="#come-funziona">Come funziona</a>'
-            '<a href="#prezzi">Prezzi</a>'
-            '<a href="#faq">FAQ</a>'
-            '</div>',
+            (
+                '<div class="pp-nav-links">'
+                '<a href="#funzionalita">Funzionalità</a>'
+                '<a href="#come-funziona">Come funziona</a>'
+                + ('' if operational_mode_enabled() else '<a href="#prezzi">Prezzi</a>')
+                + '<a href="#faq">FAQ</a>'
+                + '</div>'
+            ),
             unsafe_allow_html=True,
         )
     with login_col:
         if st.button("Login", key="public_nav_login", width="stretch"):
             _go_public("login")
     with cta_col:
-        if st.button("Inizia Gratis", key="public_nav_signup", width="stretch", type="primary"):
-            _go_public("register", "free")
+        if st.button("Configura PricePilot" if operational_mode_enabled() else "Inizia Gratis", key="public_nav_signup", width="stretch", type="primary"):
+            _go_public("register", operational_plan() if operational_mode_enabled() else "free")
 
 
 def _render_landing_page():
@@ -1001,13 +1010,13 @@ def _render_landing_page():
             '</section>',
             unsafe_allow_html=True,
         )
-        if st.button("Inizia Gratis", key="hero_start_free", width="stretch", type="primary"):
-            _go_public("register", "free")
+        if st.button("Configura PricePilot" if operational_mode_enabled() else "Inizia Gratis", key="hero_start_free", width="stretch", type="primary"):
+            _go_public("register", operational_plan() if operational_mode_enabled() else "free")
         st.markdown(
             '<div class="pp-proof-row">'
             '<span class="pp-proof"><strong>6h</strong> analisi calendario</span>'
-            '<span class="pp-proof"><strong>Plus</strong> Telegram approval</span>'
-            '<span class="pp-proof"><strong>Pro</strong> portfolio e report</span>'
+            '<span class="pp-proof"><strong>Telegram</strong> approval</span>'
+            '<span class="pp-proof"><strong>Beds24</strong> pronto al collaudo</span>'
             '<span class="pp-proof">Multi property ready</span>'
             '</div>',
             unsafe_allow_html=True,
@@ -1024,9 +1033,12 @@ def _render_landing_page():
         _render_dashboard_mockup()
 
     _render_social_proof_section()
-    _render_features_section()
-    _render_how_it_works_section()
-    _render_pricing_section()
+    if operational_mode_enabled():
+        _render_operational_features_section()
+    else:
+        _render_features_section()
+        _render_how_it_works_section()
+        _render_pricing_section()
     _render_faq_section()
     _render_final_cta_section()
     _render_public_legal_footer()
@@ -1161,6 +1173,22 @@ def _render_dashboard_mockup():
 
 
 def _render_social_proof_section():
+    if operational_mode_enabled():
+        st.markdown("""
+        <section class="pp-proof-panel">
+          <div class="pp-proof-top"><div>
+            <div class="pp-proof-kicker">Configurazione operativa Luma Pisa</div>
+            <h3 class="pp-proof-title">Un flusso prudente: calendario, proposta, Telegram, approvazione.</h3>
+          </div><div class="pp-live-status">
+            <span class="pp-status-chip"><i class="pp-status-dot"></i>Calendario verificabile</span>
+            <span class="pp-status-chip"><i class="pp-status-dot"></i>Beds24-ready</span>
+            <span class="pp-status-chip"><i class="pp-status-dot"></i>Guardrail attivi</span>
+          </div></div>
+          <div class="pp-logo-wall"><span>Airbnb via Beds24</span><span>Vrbo via Beds24</span><span>Sito diretto via Beds24</span></div>
+          <div class="pp-proof-metrics"><div><b>6h</b><span>ciclo calendario configurabile</span></div><div><b>30 giorni</b><span>occupazione sulle notti vendibili</span></div><div><b>1 click</b><span>approvazione Telegram</span></div><div><b>0</b><span>scritture non approvate</span></div></div>
+        </section>
+        """, unsafe_allow_html=True)
+        return
     st.markdown("""
     <section class="pp-proof-panel">
       <div class="pp-proof-top">
@@ -1184,6 +1212,26 @@ def _render_social_proof_section():
         <div><b>1 click</b><span>approval Telegram per il piano Plus</span></div>
         <div><b>25</b><span>proprietà gestibili nel piano Pro</span></div>
       </div>
+    </section>
+    """, unsafe_allow_html=True)
+
+
+def _render_operational_features_section():
+    st.markdown("""
+    <section class="pp-section"><span id="funzionalita"></span>
+      <h2>PricePilot per Luma Pisa.</h2>
+      <p class="pp-section-lead">Imposti tariffe di riferimento e limiti. PricePilot legge il calendario Beds24, segnala occasioni concrete e invia una proposta su Telegram. Il prezzo parte solo dopo la tua approvazione.</p>
+    </section>
+    <section class="pp-feature-row"><div class="pp-feature-copy">
+      <div class="pp-feature-kicker">Configurazione iniziale</div><h2>Prima imposti le regole che contano per te.</h2>
+      <p>Minimo, massimo, break-even, weekend, anticipo, pickup e vuoti brevi restano sempre sotto il tuo controllo.</p>
+    </div></section>
+    <section class="pp-feature-row reverse"><div class="pp-feature-copy">
+      <div class="pp-feature-kicker">Flusso di approvazione</div><h2>Nessun prezzo cambia da solo.</h2>
+      <p>Una proposta valida mostra data, prezzo attuale, prezzo suggerito e motivazione. Puoi approvarla o rifiutarla dalla dashboard o da Telegram.</p>
+    </div></section>
+    <section class="pp-section"><span id="come-funziona"></span><h2>Come funziona.</h2>
+      <p class="pp-section-lead">1. Configuri Luma Pisa. 2. Colleghi Beds24 in sola lettura. 3. Verifichi una proposta. 4. Solo dopo il collaudo abiliti gli invii approvati.</p>
     </section>
     """, unsafe_allow_html=True)
 
@@ -1516,15 +1564,15 @@ def _render_faq_section():
         unsafe_allow_html=True,
     )
     with st.expander("PricePilot cambia già i prezzi sulle OTA?"):
-        st.write("Free richiede l'aggiornamento manuale. Plus e Pro possono inviare il prezzo a Beds24 soltanto dopo la tua approvazione e quando il collegamento è stato collaudato.")
+        st.write("Può inviare un prezzo a Beds24 soltanto dopo la tua approvazione e quando il collegamento è stato collaudato.")
     with st.expander("Come funziona Telegram approval?"):
         st.write("Ricevi prezzo attuale, prezzo suggerito e motivazione. Approvi o rifiuti con un click, senza aprire la dashboard.")
     with st.expander("Airbnb, Booking e channel manager sono supportati?"):
         st.write("PricePilot si collega a Beds24. È Beds24 a sincronizzare calendario e prezzi con le OTA configurate; ogni canale va verificato separatamente durante il collaudo.")
     with st.expander("Posso usarlo con una sola proprietà?"):
-        st.write("Sì. Il piano Free è pensato per partire con una proprietà e capire subito come PricePilot ragiona sui prezzi.")
+        st.write("Sì. Questa configurazione iniziale è pensata per Luma Pisa e resta pronta per aggiungere altre proprietà in futuro.")
     with st.expander("Ogni quanto analizza il calendario?"):
-        st.write("Il ciclo operativo può analizzare calendario e regole ogni 6 ore, in base al piano e alle impostazioni.")
+        st.write("Il ciclo operativo può analizzare calendario e regole ogni 6 ore, in base alle impostazioni.")
     st.markdown("</div>", unsafe_allow_html=True)
     return
     st.markdown('<span id="faq"></span>', unsafe_allow_html=True)
@@ -1549,14 +1597,14 @@ def _render_final_cta_section():
     st.markdown(
         '<section class="pp-final-cta">'
         '<h2>Revenue management professionale, senza complessita.</h2>'
-        '<p>Parti con i suggerimenti. Collega Beds24 e Telegram quando vuoi approvare e inviare i prezzi mantenendo il controllo.</p>'
+        '<p>Configura Luma Pisa. Collega Beds24 e Telegram quando vuoi approvare e inviare i prezzi mantenendo il controllo.</p>'
         '</section>',
         unsafe_allow_html=True,
     )
     _, col, _ = st.columns([1.2, 1, 1.2])
     with col:
-        if st.button("Inizia Gratis", key="final_start_free", width="stretch", type="primary"):
-            _go_public("register", "free")
+        if st.button("Configura PricePilot" if operational_mode_enabled() else "Inizia Gratis", key="final_start_free", width="stretch", type="primary"):
+            _go_public("register", operational_plan() if operational_mode_enabled() else "free")
     return
     st.markdown(
         '<section class="pp-final-cta">'
@@ -1626,9 +1674,12 @@ def _render_auth_panel(client, view: str):
     with col:
         plan = _plan_for_auth_view(view)
         with st.container(border=True, key=f"pp_auth_card_{view}"):
+            operation_badge = (
+                '<span class="pp-plan-pill">Configurazione operativa · approvazione Telegram</span>'
+                if operational_mode_enabled() else f'<span class="pp-plan-pill">Piano scelto: {get_plan(plan)["label"]}</span>'
+            )
             st.markdown(
-                f'<span class="pp-plan-pill">Piano scelto: {get_plan(plan)["label"]}</span>'
-                f'<div class="pp-auth-title">{_auth_title(view)}</div>'
+                operation_badge + f'<div class="pp-auth-title">{_auth_title(view)}</div>'
                 f'<div class="pp-auth-copy">{_auth_copy(view)}</div>',
                 unsafe_allow_html=True,
             )
@@ -1677,13 +1728,17 @@ def _render_auth_panel(client, view: str):
             else:
                 signup_email = st.text_input("Email", key="auth_signup_email", placeholder="mario@esempio.it")
                 signup_name = st.text_input("Nome attività", key="auth_signup_account_name", placeholder="Es. Rossi Apartments")
-                selected_plan = st.selectbox(
-                    "Piano scelto",
-                    list(PLAN_ORDER),
-                    index=list(PLAN_ORDER).index(plan),
-                    format_func=lambda p: get_plan(p)["label"],
-                    key="auth_signup_plan",
-                )
+                if operational_mode_enabled():
+                    selected_plan = operational_plan()
+                    st.caption("Ogni proposta prezzo richiederà sempre la tua approvazione prima dell'invio a Beds24.")
+                else:
+                    selected_plan = st.selectbox(
+                        "Piano scelto",
+                        list(PLAN_ORDER),
+                        index=list(PLAN_ORDER).index(plan),
+                        format_func=lambda p: get_plan(p)["label"],
+                        key="auth_signup_plan",
+                    )
                 st.session_state[_KEY_SELECTED_PLAN] = selected_plan
                 if _signup_plan_requires_checkout(selected_plan):
                     st.info(
