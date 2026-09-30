@@ -170,12 +170,22 @@ class Beds24Client:
                 result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
                                "headers": safe_headers, "body": body})
                 break
-            records = body.get("data", []) if isinstance(body, dict) else []
+            if isinstance(body, dict):
+                records = body.get("data", [])
+                reply_type = body.get("type")
+            elif isinstance(body, list):
+                records = body
+                reply_type = "list"
+            else:
+                records = []
+                reply_type = type(body).__name__
+            if not isinstance(records, list):
+                records = []
             property_record = next((item for item in records if isinstance(item, dict) and item.get("id") == property_id), None)
             rooms = ((property_record or {}).get("roomTypes") or (property_record or {}).get("rooms") or [])
             room_present = any(isinstance(room, dict) and room.get("id") == room_id for room in rooms)
-            summary = {"type": body.get("type") if isinstance(body, dict) else None,
-                       "count": len(records), "property_present": property_record is not None,
+            summary = {"type": reply_type, "count": len(records),
+                       "property_present": property_record is not None,
                        "room_present": room_present}
             result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
                            "headers": safe_headers, "body": summary})
