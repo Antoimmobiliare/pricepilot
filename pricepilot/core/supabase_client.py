@@ -130,7 +130,18 @@ def get_supabase_admin_client() -> Any | None:
         return None
 
     try:
-        return create_client(url, key)
+        from supabase import create_client
+        from supabase.lib.client_options import SyncClientOptions
+        # A pricing cycle may acquire one lease per future date.  Keep an
+        # unavailable RPC from blocking the Streamlit session for the default
+        # 120 seconds on every date; the caller records a sanitized error and
+        # leaves all channel writes disabled.
+        options = SyncClientOptions(
+            postgrest_client_timeout=15,
+            storage_client_timeout=15,
+            function_client_timeout=15,
+        )
+        return create_client(url, key, options=options)
     except Exception as exc:
         logger.warning("Impossibile creare il client Supabase service role: %s", exc)
         return None
