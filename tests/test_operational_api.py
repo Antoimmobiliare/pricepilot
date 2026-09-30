@@ -83,6 +83,22 @@ class OperationalApiTests(unittest.TestCase):
         self.assertEqual(error.exception.status_code, 404)
         self.assertIsNotNone(db.get_property(self.prop["id"], account_id=self.account))
 
+    def test_property_identity_metadata_round_trips_without_affecting_guardrails(self):
+        prop = create_property({
+            "account_id": self.account, "name": "Identity fixture", "platform": "airbnb",
+            "city": "Pisa", "property_type": "entire_apartment", "max_guests": 3,
+            "area_m2": 43, "layout_summary": "1 camera matrimoniale + divano letto",
+            "min_price": 79, "max_price": 160, "plan": "plus", "sync_mode": "approval",
+        })
+        stored = db.get_property(prop["id"], account_id=self.account)
+        self.assertEqual(stored["property_type"], "entire_apartment")
+        self.assertEqual(stored["max_guests"], 3)
+        self.assertEqual(stored["area_m2"], 43)
+        self.assertEqual(stored["layout_summary"], "1 camera matrimoniale + divano letto")
+        self.assertEqual(stored["min_price"], 79)
+        self.assertEqual(stored["max_price"], 160)
+        self.assertEqual(stored["sync_mode"], "approval")
+
     def test_reject_is_compare_and_set_and_account_scoped(self):
         from pricepilot.api import server
         decision_id = db.save_decision_log({

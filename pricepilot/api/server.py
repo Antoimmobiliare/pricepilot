@@ -263,6 +263,10 @@ class PropertyCreate(BaseModel):
     listing_url: str   = Field("", example="https://airbnb.com/rooms/123")
     listing_id:  str   = Field("", example="123456")
     city:        str   = Field("", example="Rome")
+    property_type: str = Field("", example="entire_apartment")
+    max_guests: Optional[int] = Field(None, ge=1, le=100)
+    area_m2: Optional[float] = Field(None, gt=0, le=100000)
+    layout_summary: str = Field("")
     latitude:    Optional[float] = None
     longitude:   Optional[float] = None
     min_price:   float = Field(50.0, ge=10)
@@ -277,6 +281,10 @@ class PropertyUpdate(BaseModel):
     listing_url: Optional[str]   = None
     listing_id:  Optional[str]   = None
     city:        Optional[str]   = None
+    property_type: Optional[str] = None
+    max_guests: Optional[int] = Field(None, ge=1, le=100)
+    area_m2: Optional[float] = Field(None, gt=0, le=100000)
+    layout_summary: Optional[str] = None
     min_price:   Optional[float] = None
     max_price:   Optional[float] = None
     plan:        Optional[str]   = None

@@ -62,6 +62,10 @@ def init_db() -> None:
             listing_url TEXT,
             listing_id  TEXT,
             city        TEXT,
+            property_type TEXT NOT NULL DEFAULT '',
+            max_guests  INTEGER,
+            area_m2     REAL,
+            layout_summary TEXT NOT NULL DEFAULT '',
             latitude    REAL,
             longitude   REAL,
             min_price   REAL    NOT NULL DEFAULT 50.0,
@@ -485,6 +489,14 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE properties ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'"
             )
+        if "property_type" not in cols_p:
+            conn.execute("ALTER TABLE properties ADD COLUMN property_type TEXT NOT NULL DEFAULT ''")
+        if "max_guests" not in cols_p:
+            conn.execute("ALTER TABLE properties ADD COLUMN max_guests INTEGER")
+        if "area_m2" not in cols_p:
+            conn.execute("ALTER TABLE properties ADD COLUMN area_m2 REAL")
+        if "layout_summary" not in cols_p:
+            conn.execute("ALTER TABLE properties ADD COLUMN layout_summary TEXT NOT NULL DEFAULT ''")
 
         ensure_default_account(conn)
         conn.execute(
@@ -1531,14 +1543,15 @@ def upsert_property(prop: Dict) -> int:
             conn.execute("""
                 UPDATE properties SET
                     account_id=?, name=?, platform=?, listing_url=?, listing_id=?,
-                    city=?, latitude=?, longitude=?,
+                    city=?, property_type=?, max_guests=?, area_m2=?, layout_summary=?, latitude=?, longitude=?,
                     min_price=?, max_price=?, sync_mode=?, strategy=?, plan=?, updated_at=?
                 WHERE id=?
             """, (
                 prop.get("account_id", 1),
                 prop["name"], prop.get("platform", "airbnb"),
                 prop.get("listing_url", ""), prop.get("listing_id", ""),
-                prop.get("city", ""), prop.get("latitude"), prop.get("longitude"),
+                prop.get("city", ""), prop.get("property_type", ""), prop.get("max_guests"),
+                prop.get("area_m2"), prop.get("layout_summary", ""), prop.get("latitude"), prop.get("longitude"),
                 prop.get("min_price", 50), prop.get("max_price", 500),
                 prop.get("sync_mode", "advisory"),
                 prop.get("strategy", "balanced"),
@@ -1551,15 +1564,16 @@ def upsert_property(prop: Dict) -> int:
                 conn.execute("""
                     INSERT INTO properties
                         (id, account_id, name, platform, listing_url, listing_id, city,
-                         latitude, longitude, min_price, max_price,
+                         property_type, max_guests, area_m2, layout_summary, latitude, longitude, min_price, max_price,
                          sync_mode, strategy, plan, created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     prop["id"],
                     prop.get("account_id", 1),
                     prop["name"], prop.get("platform", "airbnb"),
                     prop.get("listing_url", ""), prop.get("listing_id", ""),
-                    prop.get("city", ""), prop.get("latitude"), prop.get("longitude"),
+                    prop.get("city", ""), prop.get("property_type", ""), prop.get("max_guests"),
+                    prop.get("area_m2"), prop.get("layout_summary", ""), prop.get("latitude"), prop.get("longitude"),
                     prop.get("min_price", 50), prop.get("max_price", 500),
                     prop.get("sync_mode", "advisory"),
                     prop.get("strategy", "balanced"),
@@ -1570,14 +1584,15 @@ def upsert_property(prop: Dict) -> int:
             cur = conn.execute("""
                 INSERT INTO properties
                     (account_id, name, platform, listing_url, listing_id, city,
-                     latitude, longitude, min_price, max_price,
+                     property_type, max_guests, area_m2, layout_summary, latitude, longitude, min_price, max_price,
                      sync_mode, strategy, plan, created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 prop.get("account_id", 1),
                 prop["name"], prop.get("platform", "airbnb"),
                 prop.get("listing_url", ""), prop.get("listing_id", ""),
-                prop.get("city", ""), prop.get("latitude"), prop.get("longitude"),
+                prop.get("city", ""), prop.get("property_type", ""), prop.get("max_guests"),
+                prop.get("area_m2"), prop.get("layout_summary", ""), prop.get("latitude"), prop.get("longitude"),
                 prop.get("min_price", 50), prop.get("max_price", 500),
                 prop.get("sync_mode", "advisory"),
                 prop.get("strategy", "balanced"),

@@ -124,6 +124,10 @@ def _validate(data: Dict) -> None:
         raise ValueError("Il nome della proprietà è obbligatorio.")
     if data.get("sync_mode") and data["sync_mode"] not in SYNC_MODES:
         raise ValueError(f"sync_mode deve essere uno di: {SYNC_MODES}")
+    if data.get("max_guests") is not None and int(data["max_guests"]) < 1:
+        raise ValueError("Il numero massimo di ospiti deve essere almeno 1.")
+    if data.get("area_m2") is not None and float(data["area_m2"]) <= 0:
+        raise ValueError("La superficie deve essere maggiore di zero.")
     if operational_mode_enabled():
         data["plan"] = operational_plan()
         data["sync_mode"] = "approval"

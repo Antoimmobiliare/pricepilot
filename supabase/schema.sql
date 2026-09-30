@@ -81,6 +81,10 @@ create table if not exists public.properties (
     listing_url text not null default '',
     listing_id text not null default '',
     city text not null default '',
+    property_type text not null default '',
+    max_guests integer,
+    area_m2 numeric,
+    layout_summary text not null default '',
     latitude double precision,
     longitude double precision,
     min_price numeric not null default 50,
@@ -333,6 +337,10 @@ alter table if exists public.properties
     add column if not exists listing_url text default '',
     add column if not exists listing_id text default '',
     add column if not exists city text default '',
+    add column if not exists property_type text default '',
+    add column if not exists max_guests integer,
+    add column if not exists area_m2 numeric,
+    add column if not exists layout_summary text default '',
     add column if not exists latitude double precision,
     add column if not exists longitude double precision,
     add column if not exists min_price numeric default 50,
@@ -349,6 +357,8 @@ update public.properties set platform = 'airbnb' where platform is null;
 update public.properties set listing_url = '' where listing_url is null;
 update public.properties set listing_id = '' where listing_id is null;
 update public.properties set city = '' where city is null;
+update public.properties set property_type = '' where property_type is null;
+update public.properties set layout_summary = '' where layout_summary is null;
 update public.properties set min_price = 50 where min_price is null;
 update public.properties set max_price = 500 where max_price is null;
 update public.properties set sync_mode = 'advisory' where sync_mode is null;
@@ -364,6 +374,8 @@ alter table if exists public.properties
     alter column listing_url set not null,
     alter column listing_id set not null,
     alter column city set not null,
+    alter column property_type set not null,
+    alter column layout_summary set not null,
     alter column min_price set not null,
     alter column max_price set not null,
     alter column sync_mode set not null,

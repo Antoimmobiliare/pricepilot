@@ -19,6 +19,10 @@ class Property:
     listing_url: str         = ""
     listing_id:  str         = ""
     city:        str         = ""
+    property_type: str       = ""
+    max_guests:  Optional[int] = None
+    area_m2:     Optional[float] = None
+    layout_summary: str      = ""
     latitude:    Optional[float] = None
     longitude:   Optional[float] = None
     min_price:   float       = 50.0

@@ -84,6 +84,18 @@ def render_properties(account_id, property_id=None):
     with st.form(f'property_basics_{account_id}_{editing.get("id", "new")}'):
         name = st.text_input('Nome appartamento', value=editing.get('name', ''))
         city = st.text_input('Città e zona', value=editing.get('city', ''))
+        details_left, details_right = st.columns(2)
+        property_type = details_left.selectbox(
+            'Tipologia', ['Appartamento intero', 'Stanza privata', 'Altro'],
+            index=['Appartamento intero', 'Stanza privata', 'Altro'].index(
+                {'entire_apartment': 'Appartamento intero', 'private_room': 'Stanza privata'}.get(
+                    editing.get('property_type', ''), 'Altro')))
+        max_guests = details_right.number_input('Ospiti massimi', min_value=1,
+                                                value=int(editing.get('max_guests') or 1), step=1)
+        area_m2 = details_left.number_input('Superficie (m², facoltativa)', min_value=0.0,
+                                            value=float(editing.get('area_m2') or 0), step=1.0)
+        layout_summary = details_right.text_input('Camere e posti letto (facoltativo)',
+                                                  value=editing.get('layout_summary', ''))
         listing = st.text_input('Link annuncio (facoltativo prima del lancio)', value=editing.get('listing_url', ''))
         st.caption('Il link identifica l’annuncio. Calendario e prenotazioni arriveranno dal channel manager.')
         left, right = st.columns(2)
@@ -99,6 +111,11 @@ def render_properties(account_id, property_id=None):
                     account = _account(account_id) or {}
                     payload = {**editing, 'account_id': account_id, 'name': name.strip(), 'city': city.strip(),
                                'listing_url': listing.strip(), 'min_price': minimum, 'max_price': maximum,
+                               'property_type': {'Appartamento intero': 'entire_apartment',
+                                                 'Stanza privata': 'private_room', 'Altro': 'other'}[property_type],
+                               'max_guests': int(max_guests),
+                               'area_m2': float(area_m2) or None,
+                               'layout_summary': layout_summary.strip(),
                                'sync_mode': 'approval', 'plan': account.get('plan', editing.get('plan', 'free'))}
                     saved = update_property(editing['id'], payload) if editing else create_property(payload)
                     st.session_state['active_prop_id'] = saved['id']
