@@ -73,6 +73,19 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaises(Beds24Error):
             self.normalize([0, 0, 1], [self.booking(roomId=99)])
 
+    def test_calendar_without_property_id_is_normalized(self):
+        calendar = self.calendar([1, 1, 1])
+        del calendar[0]['propertyId']
+        rows = normalize_snapshot(MAPPING, calendar, [], DAY, DAY + timedelta(days=3), STAMP)
+        self.assertEqual([row['state'] for row in rows], ['open', 'open', 'open'])
+
+    def test_calendar_with_different_room_id_is_rejected(self):
+        calendar = self.calendar([1, 1, 1])
+        del calendar[0]['propertyId']
+        calendar[0]['roomId'] = 99
+        with self.assertRaisesRegex(Beds24Error, 'Calendario fuori dal mapping'):
+            normalize_snapshot(MAPPING, calendar, [], DAY, DAY + timedelta(days=3), STAMP)
+
     def test_missing_booking_id_is_rejected(self):
         with self.assertRaises(Beds24Error):
             self.normalize([0, 0, 1], [self.booking(id=None)])
@@ -154,6 +167,43 @@ class PublicationTests(unittest.TestCase):
 
 
 class ClientProtocolTests(unittest.TestCase):
+    def test_calendar_uses_property_and_room_scope_without_record_property_id(self):
+        mapping = {'beds24_property_id': 357389, 'room_id': 736801, 'price_slot': 1}
+
+        def handle(request):
+            self.assertEqual(request.method, 'GET')
+            self.assertEqual(request.url.path, '/api/v2/inventory/rooms/calendar')
+            self.assertEqual(request.url.params['propertyId'], '357389')
+            self.assertEqual(request.url.params['roomId'], '736801')
+            self.assertEqual(request.url.params['includePrices'], 'true')
+            return httpx.Response(200, json={'data': [{'roomId': 736801, 'calendar': []}],
+                                             'pages': {'nextPageExists': False}})
+
+        client = Beds24Client(token='SYNTHETIC', transport=httpx.MockTransport(handle))
+        self.addCleanup(client.close)
+        self.assertEqual(client.calendar(mapping, DAY, DAY), [{'roomId': 736801, 'calendar': []}])
+
+    def test_calendar_rejects_wrong_room_without_synthetic_fallback(self):
+        mapping = {'beds24_property_id': 357389, 'room_id': 736801, 'price_slot': 1}
+
+        def handle(request):
+            return httpx.Response(200, json={'data': [{'roomId': 736802, 'calendar': []}],
+                                             'pages': {'nextPageExists': False}})
+
+        client = Beds24Client(token='SYNTHETIC', transport=httpx.MockTransport(handle))
+        self.addCleanup(client.close)
+        with self.assertRaisesRegex(Beds24Error, 'immobile diverso'):
+            client.calendar(mapping, DAY, DAY)
+
+    def test_invalid_calendar_response_has_no_synthetic_fallback(self):
+        def handle(request):
+            return httpx.Response(200, json={'data': 'not-a-list', 'pages': {'nextPageExists': False}})
+
+        client = Beds24Client(token='SYNTHETIC', transport=httpx.MockTransport(handle))
+        self.addCleanup(client.close)
+        with self.assertRaisesRegex(Beds24Error, 'incompleta'):
+            client.calendar(MAPPING, DAY, DAY)
+
     def test_refresh_token_and_pagination_without_following_remote_links(self):
         seen = []
         def handle(request):

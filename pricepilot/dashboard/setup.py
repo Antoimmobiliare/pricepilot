@@ -354,11 +354,14 @@ def render_integrations(account_id, property_id=None):
     else:
         st.info('Collegamento da completare al lancio: ID Beds24, credenziali sul server e attivazione.')
     if st.button('Verifica e aggiorna calendario', disabled=not (mapping.get('enabled') and credentials)):
+        from pricepilot.integrations.beds24 import Beds24Error
         from pricepilot.services.beds24_sync import sync_property
         try:
             with st.spinner('Lettura calendario e prenotazioni…'):
                 result = sync_property(account_id, prop['id'], date.today(), horizon_days=90)
             st.success(f"Calendario acquisito: {result['days']} giorni. Nessun prezzo inviato.")
+        except Beds24Error as exc:
+            st.error(f'Acquisizione read-only non riuscita: {exc}. Nessun dato precedente è considerato aggiornato.')
         except Exception:
-            st.error('Acquisizione non riuscita. Controlla ID, autorizzazioni e raggiungibilità di Beds24; non considerare aggiornati i dati precedenti.')
+            st.error('Acquisizione read-only non riuscita: errore interno PricePilot. Nessun dato precedente è considerato aggiornato.')
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')

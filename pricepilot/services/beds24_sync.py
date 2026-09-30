@@ -71,7 +71,9 @@ def normalize_snapshot(mapping, calendar, bookings, start, end, observed_at):
         raise Beds24Error("Finestra inventario non valida.")
     by_day = {}
     for room in calendar:
-        if room.get("roomId") != mapping["room_id"] or room.get("propertyId") != mapping["beds24_property_id"]:
+        # Calendar records from Beds24 V2 do not contain propertyId. The GET
+        # request is already property-scoped; roomId remains mandatory.
+        if room.get("roomId") != mapping["room_id"]:
             raise Beds24Error("Calendario fuori dal mapping.")
         entries = room.get('calendar')
         if not isinstance(entries, list):
@@ -186,11 +188,27 @@ def sync_property(account_id, property_id, start, horizon_days=90):
     client= Beds24Client(token=os.getenv(mapping.get("token_env",""),""),
                         refresh_token=os.getenv(mapping.get("refresh_token_env",""),""))
     try:
-        cal=client.calendar(mapping,acquisition_start,end-timedelta(days=1))
-        bookings=client.bookings(mapping,acquisition_start,end)
+        try:
+            cal=client.calendar(mapping,acquisition_start,end-timedelta(days=1))
+        except Beds24Error as exc:
+            raise Beds24Error(f"calendar_get: {exc}") from None
+        try:
+            bookings=client.bookings(mapping,acquisition_start,end)
+        except Beds24Error as exc:
+            raise Beds24Error(f"bookings_get: {exc}") from None
         observed_at=datetime.now(timezone.utc).isoformat()
-        rows=normalize_snapshot(mapping,cal,bookings,acquisition_start,end,observed_at)
-        reservations=normalize_reservations(mapping,bookings,observed_at)
+        try:
+            rows=normalize_snapshot(mapping,cal,bookings,acquisition_start,end,observed_at)
+        except Beds24Error as exc:
+            raise Beds24Error(f"calendar_parse/normalize: {exc}") from None
+        except Exception:
+            raise Beds24Error("calendar_parse/normalize: errore interno PricePilot.") from None
+        try:
+            reservations=normalize_reservations(mapping,bookings,observed_at)
+        except Beds24Error as exc:
+            raise Beds24Error(f"bookings_parse/normalize: {exc}") from None
+        except Exception:
+            raise Beds24Error("bookings_parse/normalize: errore interno PricePilot.") from None
     finally:
         client.close()
     # Persist observed current rates using the existing repository, preserving locks.

@@ -127,7 +127,9 @@ class Beds24Client:
             "propertyId": mapping["beds24_property_id"], "roomId": mapping["room_id"],
             "startDate": start.isoformat(), "endDate": end.isoformat(),
             "includePrices": "true", "includeNumAvail": "true", "includeOverride": "true", "includeMinStay": "true"})
-        if any(r.get("roomId") != mapping["room_id"] or r.get("propertyId") != mapping["beds24_property_id"] for r in rows):
+        # Beds24 V2 calendar records carry roomId but do not include propertyId.
+        # Property scope is enforced by the request itself; retain the room guard.
+        if any(r.get("roomId") != mapping["room_id"] for r in rows):
             raise Beds24Error("Beds24 ha restituito un immobile diverso dal mapping.")
         return rows
 

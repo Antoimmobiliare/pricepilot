@@ -167,9 +167,9 @@ class Beds24Tests(unittest.TestCase):
             return httpx.Response(200,json=self.response(numAvail=0,override='blackout'))
         with self.assertRaises(Beds24Error): self.client(handle).set_price(self.mapping,DAY,110)
 
-    def test_wrong_property_response_is_rejected(self):
+    def test_wrong_room_response_is_rejected(self):
         def handle(req):
-            payload=self.response(); payload['data'][0]['propertyId']=99
+            payload=self.response(); payload['data'][0]['roomId']=99
             return httpx.Response(200,json=payload)
         with self.assertRaises(Beds24Error): self.client(handle).current_day(self.mapping,DAY)
 
@@ -282,7 +282,9 @@ class ApprovalIntegrityTests(unittest.TestCase):
 
     def test_repeated_approval_sends_once(self):
         from pricepilot.engine.decision_engine import approve_decision
-        with patch('pricepilot.engine.decision_engine._channel_manager_update',return_value={'ok':True,'is_real':True,'platform':'test','listing_id':'test'}) as send:
+        # This test isolates idempotency from production inventory freshness.
+        with patch('pricepilot.engine.decision_engine.demo_enabled', return_value=True), \
+             patch('pricepilot.engine.decision_engine._channel_manager_update',return_value={'ok':True,'is_real':True,'platform':'test','listing_id':'test'}) as send:
             self.assertTrue(approve_decision(self.log,self.account['id'])['applied'])
             self.assertEqual(approve_decision(self.log,self.account['id'])['status'],'already_applied')
         self.assertEqual(send.call_count,1)
