@@ -5,6 +5,7 @@ import secrets
 
 from pricepilot.core import database as db
 from pricepilot.core.data_backend import CloudDatabaseUnavailable, is_supabase_primary
+from pricepilot.core.supabase_client import get_supabase_admin_client
 from pricepilot.core.data_quality import DataUnavailable
 
 
@@ -25,9 +26,14 @@ def pricing_date_lease(account_id: int, property_id: int, date_str: str, ttl_sec
 
 def _acquire(account_id, property_id, date_str, token, expires):
     if is_supabase_primary():
-        from pricepilot.services.supabase_primary import _client
         try:
-            response = _client().rpc("acquire_pricepilot_pricing_lock", {
+            # The lock RPC is deliberately executable only by service_role.
+            # Account-scoped reads still use the authenticated tenant client;
+            # coordination must use the server-side admin client instead.
+            client = get_supabase_admin_client()
+            if client is None:
+                raise RuntimeError("Supabase service role client unavailable")
+            response = client.rpc("acquire_pricepilot_pricing_lock", {
                 "p_account_id": account_id, "p_property_id": property_id,
                 "p_target_date": date_str, "p_owner_token": token,
                 "p_expires_at": expires.isoformat(),
@@ -58,9 +64,11 @@ def _acquire(account_id, property_id, date_str, token, expires):
 
 def _release(account_id, property_id, date_str, token):
     if is_supabase_primary():
-        from pricepilot.services.supabase_primary import _client
         try:
-            _client().rpc("release_pricepilot_pricing_lock", {
+            client = get_supabase_admin_client()
+            if client is None:
+                return
+            client.rpc("release_pricepilot_pricing_lock", {
                 "p_account_id": account_id, "p_property_id": property_id,
                 "p_target_date": date_str, "p_owner_token": token,
             }).execute()
