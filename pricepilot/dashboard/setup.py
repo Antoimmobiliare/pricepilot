@@ -335,6 +335,15 @@ def render_integrations(account_id, property_id=None):
             st.error(str(exc))
         finally:
             client.close()
+    if st.button('Diagnostica GET proprietà Beds24', disabled=not credentials):
+        from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
+        client = Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''), refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
+        try:
+            st.json(client.diagnose_properties(int(external), int(room)))
+        except Beds24Error as exc:
+            st.error(str(exc))
+        finally:
+            client.close()
     if mapping.get('enabled') and credentials:
         st.info('Configurazione presente. Verifica ora la lettura del calendario per questo appartamento.')
     else:

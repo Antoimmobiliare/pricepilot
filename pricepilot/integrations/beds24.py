@@ -147,6 +147,26 @@ class Beds24Client:
             raise Beds24Error("Piano tariffario Beds24 assente o ambiguo: nessun slot salvato.")
         return rules[0]["id"]
 
+    def diagnose_properties(self, property_id, room_id):
+        attempts = [{}, {"id": property_id}, {"id": property_id, "includePriceRules": "true"}]
+        result = []
+        for params in attempts:
+            response = self._http.get("/properties", headers=self._headers(), params=params)
+            safe_headers = {key: response.headers.get(key) for key in
+                ("x-request-cost", "x-fivemincreditlimit-remaining", "x-fivemincreditlimit-resetsin")
+                if response.headers.get(key) is not None}
+            try:
+                body = response.json()
+            except ValueError:
+                body = {"detail": "Risposta non JSON"}
+            if response.status_code >= 400:
+                body = {"detail": str(body.get("message") or body.get("error") or body.get("detail") or "Errore Beds24")[:300]} if isinstance(body, dict) else {"detail": "Errore Beds24"}
+            result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
+                           "headers": safe_headers, "body": body if response.status_code >= 400 else {"type": body.get("type"), "count": len(body.get("data", []))}})
+            if response.status_code >= 400:
+                break
+        return result
+
     def bookings(self, mapping, start, end):
         rows = self._pages("/bookings", {"propertyId": mapping["beds24_property_id"],
             "roomId": mapping["room_id"], "arrivalTo": end.isoformat(), "departureFrom": start.isoformat()})
