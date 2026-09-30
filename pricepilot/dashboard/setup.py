@@ -317,6 +317,24 @@ def render_integrations(account_id, property_id=None):
                 st.error('Salvataggio non riuscito. Verifica il database.')
     credentials = bool(os.getenv(mapping.get('token_env', ''), '').strip()
                        or os.getenv(mapping.get('refresh_token_env', ''), '').strip())
+    if st.button('Verifica piano tariffario in sola lettura',
+                 disabled=not (int(external) and int(room) and credentials)):
+        from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
+        client = Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''),
+                              refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
+        try:
+            verified_slot = client.discover_price_slot(
+                {'beds24_property_id': int(external), 'room_id': int(room)}, 'Luma Pisa - Standard')
+            save_connection(account_id, prop['id'], {**mapping, 'provider': 'beds24', 'enabled': True,
+                'beds24_property_id': int(external), 'room_id': int(room), 'price_slot': verified_slot,
+                'currency': currency, 'token_env': token_name.strip(),
+                'refresh_token_env': refresh_name.strip(),
+                'price_basis': 'accommodation_only' if confirmed_basis else 'unknown'})
+            st.cache_data.clear(); st.success(f'Piano tariffario verificato in lettura: slot {verified_slot}.')
+        except Beds24Error as exc:
+            st.error(str(exc))
+        finally:
+            client.close()
     if mapping.get('enabled') and credentials:
         st.info('Configurazione presente. Verifica ora la lettura del calendario per questo appartamento.')
     else:

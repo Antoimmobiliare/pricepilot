@@ -131,6 +131,22 @@ class Beds24Client:
             raise Beds24Error("Beds24 ha restituito un immobile diverso dal mapping.")
         return rows
 
+    def discover_price_slot(self, mapping, expected_rule_name):
+        """Read the room's named Beds24 price rules; never changes Beds24."""
+        property_id, room_id = mapping.get("beds24_property_id"), mapping.get("room_id")
+        if type(property_id) is not int or type(room_id) is not int or property_id < 1 or room_id < 1:
+            raise Beds24Error("Property ID o Room ID Beds24 non validi.")
+        rooms = self._pages("/properties/rooms", {
+            "propertyId": property_id, "id": room_id, "includePriceRules": "true"})
+        matches = [room for room in rooms if room.get("propertyId") == property_id and room.get("id") == room_id]
+        if len(matches) != 1:
+            raise Beds24Error("Beds24 non ha confermato esattamente l'alloggio richiesto.")
+        rules = [rule for rule in (matches[0].get("priceRules") or [])
+                 if rule.get("name") == expected_rule_name]
+        if len(rules) != 1 or type(rules[0].get("id")) is not int or not 1 <= rules[0]["id"] <= 16:
+            raise Beds24Error("Piano tariffario Beds24 assente o ambiguo: nessun slot salvato.")
+        return rules[0]["id"]
+
     def bookings(self, mapping, start, end):
         rows = self._pages("/bookings", {"propertyId": mapping["beds24_property_id"],
             "roomId": mapping["room_id"], "arrivalTo": end.isoformat(), "departureFrom": start.isoformat()})
