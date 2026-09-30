@@ -147,8 +147,17 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._old_db_path = CONFIG["db_path"]
         self._old_database_backend = os.environ.get("PRICEPILOT_DATABASE_BACKEND")
+        self._old_runtime_env = {
+            key: os.environ.get(key)
+            for key in ("PRICEPILOT_ENV", "PRICEPILOT_DATA_PROVIDER", "PRICEPILOT_OPERATIONAL_MODE")
+        }
         # These unit tests must never write to the configured cloud tenant.
         os.environ["PRICEPILOT_DATABASE_BACKEND"] = "sqlite"
+        # These SaaS-plan tests exercise the explicit demo contract. Production
+        # must instead require a verified calendar observation before pricing.
+        os.environ["PRICEPILOT_ENV"] = "development"
+        os.environ["PRICEPILOT_DATA_PROVIDER"] = "demo"
+        os.environ["PRICEPILOT_OPERATIONAL_MODE"] = "0"
         self._cloud_sync_patches = [
             patch.object(property_service, "refresh_properties_from_supabase", return_value=[]),
             patch.object(property_service, "backfill_account_properties_to_supabase", return_value=None),
@@ -174,6 +183,11 @@ class PricePilotSaaSTestCase(unittest.TestCase):
             os.environ.pop("PRICEPILOT_DATABASE_BACKEND", None)
         else:
             os.environ["PRICEPILOT_DATABASE_BACKEND"] = self._old_database_backend
+        for key, value in self._old_runtime_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         self._tmp.cleanup()
 
     def _account(self, plan: str, name: str | None = None) -> dict:
@@ -274,6 +288,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -292,6 +307,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -310,6 +326,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         ok_result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -331,6 +348,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         )
         guarded_result = process_decision(
             property_id=guarded_prop["id"],
+            account_id=guarded_account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -349,6 +367,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -395,6 +414,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
 
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.90,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -415,6 +435,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         prop = self._property(account)
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,
@@ -437,6 +458,7 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         prop = self._property(account)
         result = process_decision(
             property_id=prop["id"],
+            account_id=account["id"],
             occupancy=0.65,
             target_date=TARGET_DATE,
             competitor_count=10,

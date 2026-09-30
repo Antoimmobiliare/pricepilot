@@ -455,17 +455,24 @@ class SecurityBasicsTestCase(unittest.TestCase):
             self.assertNotIn("[APPROVED", after_bad["decision"])
             self.assertEqual(get_telegram_approvals(account_id=account["id"]), [])
 
-            telegram_bot.process_webhook({
-                "callback_query": {
-                    "id": "good-chat",
-                    "data": f"approve_{log_id}",
-                    "message": {
-                        "chat": {"id": 111},
-                        "message_id": 11,
-                        "text": "Decisione",
-                    },
-                }
-            })
+            # This test exercises chat scoping and approval idempotency.  Use
+            # the explicit demo branch so it does not bypass the production
+            # requirement for a fresh observed calendar.
+            with patch.dict(os.environ, {
+                "PRICEPILOT_ENV": "development",
+                "PRICEPILOT_DATA_PROVIDER": "demo",
+            }, clear=False):
+                telegram_bot.process_webhook({
+                    "callback_query": {
+                        "id": "good-chat",
+                        "data": f"approve_{log_id}",
+                        "message": {
+                            "chat": {"id": 111},
+                            "message_id": 11,
+                            "text": "Decisione",
+                        },
+                    }
+                })
             after_good = get_decision_log(account_id=account["id"])[0]
             self.assertIn("[APPROVED_PENDING_MANUAL_SYNC]", after_good["decision"])
             history = get_telegram_approvals(account_id=account["id"])
