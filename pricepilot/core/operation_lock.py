@@ -43,9 +43,14 @@ def _acquire(account_id, property_id, date_str, token, expires):
             return bool(response.data)
         except CloudDatabaseUnavailable:
             raise
-        except Exception:
+        except Exception as exc:
+            # Keep the operation log useful without copying provider bodies,
+            # headers, tokens, or connection details into tenant-visible data.
+            error_kind = type(exc).__name__
+            status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            suffix = f" HTTP {status}" if isinstance(status, (int, str)) and str(status)[:1].isdigit() else ""
             raise CloudDatabaseUnavailable(
-                "Lease pricing cloud non disponibile: applicare supabase/pricing_locks.sql."
+                f"Lock cloud RPC rifiutata ({error_kind}{suffix}); verificare funzione e permessi Supabase."
             ) from None
     now = datetime.now(timezone.utc).isoformat()
     with db.get_conn() as conn:
