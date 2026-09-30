@@ -107,6 +107,19 @@ class OperationalStoreTests(unittest.TestCase):
         with self.assertRaises(Beds24Error):
             load_mapping(self.account,self.pid)
 
+    def test_disabled_connection_can_store_ids_before_price_slot_is_verified(self):
+        store.save_connection(self.account, self.pid, {
+            'provider': 'beds24', 'enabled': False,
+            'beds24_property_id': 357389, 'room_id': 736801,
+            'price_slot': None, 'currency': 'EUR',
+            'token_env': 'BEDS24_LUMA_TOKEN', 'refresh_token_env': '',
+            'price_basis': 'unknown',
+        })
+        mapping = store.get_connection(self.account, self.pid)
+        self.assertEqual(mapping['beds24_property_id'], 357389)
+        self.assertEqual(mapping['room_id'], 736801)
+        self.assertIsNone(mapping['price_slot'])
+
     def test_unknown_price_basis_does_not_invent_adr(self):
         self.snapshot()
         metric=store.get_reservation_metrics(self.account,self.pid,DAY,DAY+timedelta(days=5),now=NOW)

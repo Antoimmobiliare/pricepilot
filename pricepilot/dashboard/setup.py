@@ -277,10 +277,20 @@ def render_integrations(account_id, property_id=None):
         st.error('Archivio collegamenti non disponibile. Verifica il database.')
         return
     with st.form(f'beds24_{account_id}_{prop["id"]}'):
+        slot_verified = st.checkbox(
+            'Ho verificato tecnicamente il piano tariffario Beds24 da usare',
+            value=mapping.get('price_slot') is not None,
+            help='Non selezionare un piano per tentativi: PricePilot lo usa per identificare il campo prezzo Beds24.',
+        )
         a, b, c = st.columns(3)
         external = a.number_input('ID proprietà Beds24', min_value=0, value=int(mapping.get('beds24_property_id') or 0), step=1)
         room = b.number_input('ID alloggio Beds24', min_value=0, value=int(mapping.get('room_id') or 0), step=1)
-        slot = c.number_input('Piano tariffario Beds24 (1–16)', min_value=1, max_value=16, value=int(mapping.get('price_slot') or 1), step=1)
+        if slot_verified:
+            slot = c.number_input('Piano tariffario Beds24 (1–16)', min_value=1, max_value=16,
+                                  value=int(mapping.get('price_slot') or 1), step=1)
+        else:
+            slot = None
+            c.caption('Piano tariffario: da verificare prima di salvarlo.')
         currency = st.selectbox('Valuta', ['EUR'], index=0, help='Luma Pisa opera in euro. La selezione resta esplicita nel mapping Beds24.')
         st.caption('Inseriremo gli ID dopo la creazione dell’alloggio in Beds24. Il mapping salva proprietà, alloggio, piano tariffario, valuta e soltanto i riferimenti alle variabili segrete.')
         confirmed_basis = st.checkbox('Ho verificato che l’importo prenotazione Beds24 contiene solo il pernottamento, senza pulizia e tasse',
@@ -295,7 +305,7 @@ def render_integrations(account_id, property_id=None):
             try:
                 save_connection(account_id, prop['id'], {'provider': 'beds24', 'enabled': enabled,
                     'beds24_property_id': int(external) or None, 'room_id': int(room) or None,
-                    'price_slot': int(slot), 'currency': currency,
+                    'price_slot': int(slot) if slot is not None else None, 'currency': currency,
                     'token_env': token_name.strip(), 'refresh_token_env': refresh_name.strip(),
                     'price_basis': 'accommodation_only' if confirmed_basis else 'unknown'})
                 st.cache_data.clear()
