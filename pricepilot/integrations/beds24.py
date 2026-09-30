@@ -148,7 +148,7 @@ class Beds24Client:
         return rules[0]["id"]
 
     def diagnose_properties(self, property_id, room_id):
-        """Run the agreed read-only discovery sequence with sanitized output."""
+        """Run the agreed read-only property/price-rule discovery sequence."""
         attempts = [{}, {"id": property_id}, {"id": property_id, "includePriceRules": "true"}]
         result = []
         for index, params in enumerate(attempts):
@@ -166,30 +166,40 @@ class Beds24Client:
             except ValueError:
                 body = {"detail": "Risposta non JSON"}
             if response.status_code >= 400:
-                body = {"detail": str(body.get("message") or body.get("error") or body.get("detail") or "Errore Beds24")[:300]} if isinstance(body, dict) else {"detail": "Errore Beds24"}
+                detail = (body.get("message") or body.get("error") or body.get("detail") or "Errore Beds24") if isinstance(body, dict) else "Errore Beds24"
                 result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
-                               "headers": safe_headers, "body": body})
+                               "headers": safe_headers, "body": {"detail": str(detail)[:300]}})
                 break
             if isinstance(body, dict):
-                records = body.get("data", [])
-                reply_type = body.get("type")
+                records, reply_type = body.get("data", []), body.get("type")
             elif isinstance(body, list):
-                records = body
-                reply_type = "list"
+                records, reply_type = body, "list"
             else:
-                records = []
-                reply_type = type(body).__name__
-            if not isinstance(records, list):
-                records = []
+                records, reply_type = [], type(body).__name__
+            records = records if isinstance(records, list) else []
             property_record = next((item for item in records if isinstance(item, dict) and item.get("id") == property_id), None)
-            rooms = ((property_record or {}).get("roomTypes") or (property_record or {}).get("rooms") or [])
-            room_present = any(isinstance(room, dict) and room.get("id") == room_id for room in rooms)
+            candidate_rooms = ((property_record or {}).get("roomTypes") or (property_record or {}).get("rooms") or [])
+            candidate_rooms = candidate_rooms if isinstance(candidate_rooms, list) else []
+            rooms = []
+            for room in candidate_rooms:
+                if not isinstance(room, dict):
+                    continue
+                rules = room.get("priceRules") or []
+                rules = rules if isinstance(rules, list) else []
+                rooms.append({"id": room.get("id"), "name": room.get("name"),
+                              "price_rules": [{"id": rule.get("id"), "name": rule.get("name")}
+                                              for rule in rules if isinstance(rule, dict)]})
             summary = {"type": reply_type, "count": len(records),
+                       "response_keys": sorted(body.keys()) if isinstance(body, dict) else [],
                        "property_present": property_record is not None,
-                       "room_present": room_present}
+                       "property_keys": sorted(property_record.keys()) if isinstance(property_record, dict) else [],
+                       "room_count": len(rooms), "rooms": rooms,
+                       "requested_room_present": any(room.get("id") == room_id for room in rooms)}
             result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
                            "headers": safe_headers, "body": summary})
-            if index < len(attempts) - 1 and not (summary["property_present"] and summary["room_present"]):
+            # The generic GET need only establish property scope. Room details may
+            # legitimately appear only in the price-rules representation.
+            if index == 0 and not summary["property_present"]:
                 break
         return result
 
