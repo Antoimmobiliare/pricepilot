@@ -32,13 +32,17 @@ def _acquire(account_id, property_id, date_str, token, expires):
             # coordination must use the server-side admin client instead.
             client = get_supabase_admin_client()
             if client is None:
-                raise RuntimeError("Supabase service role client unavailable")
+                raise CloudDatabaseUnavailable(
+                    "Lock cloud non disponibile: SUPABASE_SERVICE_ROLE_KEY non rilevata nell'ambiente server."
+                )
             response = client.rpc("acquire_pricepilot_pricing_lock", {
                 "p_account_id": account_id, "p_property_id": property_id,
                 "p_target_date": date_str, "p_owner_token": token,
                 "p_expires_at": expires.isoformat(),
             }).execute()
             return bool(response.data)
+        except CloudDatabaseUnavailable:
+            raise
         except Exception:
             raise CloudDatabaseUnavailable(
                 "Lease pricing cloud non disponibile: applicare supabase/pricing_locks.sql."

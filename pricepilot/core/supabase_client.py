@@ -34,7 +34,30 @@ def _setting(name: str) -> str:
     try:
         import streamlit as st
 
-        return str(st.secrets.get(name, "") or "").strip()
+        # Streamlit exposes top-level secrets as a mapping, but versions of
+        # the secrets proxy differ in whether ``get`` is implemented.  Read
+        # both forms and support a legacy [default] section without ever
+        # logging or returning anything except the requested value.
+        secrets = st.secrets
+        try:
+            value = secrets.get(name, "")
+        except Exception:
+            value = ""
+        if not value:
+            try:
+                value = secrets[name]
+            except Exception:
+                value = ""
+        if not value:
+            try:
+                default = secrets.get("default", {})
+                if isinstance(default, dict):
+                    value = default.get(name, "")
+                elif default:
+                    value = default[name]
+            except Exception:
+                value = ""
+        return str(value or "").strip()
     except Exception:
         return ""
 
