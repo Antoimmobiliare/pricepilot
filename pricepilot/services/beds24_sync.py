@@ -125,8 +125,10 @@ def normalize_snapshot(mapping, calendar, bookings, start, end, observed_at):
     for offset in range((end-start).days):
         day = start + timedelta(days=offset)
         c = by_day.get(day)
-        if c is None or type(c.get("numAvail")) is not int or c["numAvail"] not in (0, 1):
-            raise Beds24Error("Inventario mancante o non compatibile con un appartamento intero.")
+        if c is None:
+            raise Beds24Error(f"Inventario Beds24 mancante per {day.isoformat()}.")
+        if type(c.get("numAvail")) is not int or c["numAvail"] not in (0, 1):
+            raise Beds24Error(f"numAvail Beds24 non compatibile per {day.isoformat()}.")
         override = c.get('override', 'none')
         if override not in {'none', 'blackout', 'exception', 'noCheckIn', 'noCheckOut', 'noCheckInOrCheckOut'}:
             raise Beds24Error('Restrizione calendario Beds24 non riconosciuta.')
@@ -181,24 +183,28 @@ def sync_property(account_id, property_id, start, horizon_days=90):
     from pricepilot.services.operational_store import save_snapshot, invalidate_snapshot
     mapping = load_mapping(account_id,property_id)
     end = start + timedelta(days=horizon_days+29)  # Last pricing date needs its complete 30-day occupancy window.
-    # Retain recent stays for real stay-date metrics; no synthetic historical rates.
-    acquisition_start = start - timedelta(days=90)
+    # Beds24's current inventory is the source for the operational/pricing
+    # horizon. It does not certify historical availability, so never request
+    # past days and then invent their missing inventory. Bookings retain their
+    # own 90-day history for stay-date and pickup metrics.
+    calendar_start = start
+    bookings_start = start - timedelta(days=90)
     # Previous snapshot cannot certify current availability after acquisition fails.
     invalidate_snapshot(account_id, property_id)
     client= Beds24Client(token=os.getenv(mapping.get("token_env",""),""),
                         refresh_token=os.getenv(mapping.get("refresh_token_env",""),""))
     try:
         try:
-            cal=client.calendar(mapping,acquisition_start,end-timedelta(days=1))
+            cal=client.calendar(mapping,calendar_start,end-timedelta(days=1))
         except Beds24Error as exc:
             raise Beds24Error(f"calendar_get: {exc}") from None
         try:
-            bookings=client.bookings(mapping,acquisition_start,end)
+            bookings=client.bookings(mapping,bookings_start,end)
         except Beds24Error as exc:
             raise Beds24Error(f"bookings_get: {exc}") from None
         observed_at=datetime.now(timezone.utc).isoformat()
         try:
-            rows=normalize_snapshot(mapping,cal,bookings,acquisition_start,end,observed_at)
+            rows=normalize_snapshot(mapping,cal,bookings,calendar_start,end,observed_at)
         except Beds24Error as exc:
             raise Beds24Error(f"calendar_parse/normalize: {exc}") from None
         except Exception:
@@ -227,7 +233,7 @@ def sync_property(account_id, property_id, start, horizon_days=90):
                 "current_price":row["current_price"],"current_price_source":"beds24_observation",
                 "status":(existing or {}).get("status") or "observed",
                 "notes":(existing or {}).get("notes") or "Tariffa calendario Beds24; propagazione OTA non verificata."})
-    save_snapshot(account_id,property_id,rows,reservations,acquisition_start,end,observed_at)
+    save_snapshot(account_id,property_id,rows,reservations,calendar_start,end,observed_at)
     # Optional compatibility export only when explicitly requested. Database is
     # the canonical source for application, scheduler and authenticated API.
     if os.getenv('PRICEPILOT_INVENTORY_FILE'):

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 
@@ -122,6 +122,22 @@ class SnapshotTests(unittest.TestCase):
         for key, value in prior.items():
             self.assertEqual(actual[key], value)
         self.assertEqual(actual['current_price'], 101)
+
+    def test_sync_does_not_require_historical_calendar_inventory(self):
+        fake = MagicMock()
+        rows = [{'account_id': 1, 'property_id': 2, 'date': DAY.isoformat(),
+                 'current_price': 101, 'observed_at': STAMP}]
+        with patch('pricepilot.services.beds24_sync.load_mapping', return_value=MAPPING), \
+             patch('pricepilot.services.beds24_sync.Beds24Client', return_value=fake), \
+             patch('pricepilot.services.beds24_sync.normalize_snapshot', return_value=rows), \
+             patch('pricepilot.services.beds24_sync.normalize_reservations', return_value=[]), \
+             patch('pricepilot.services.operational_store.invalidate_snapshot'), \
+             patch('pricepilot.services.operational_store.save_snapshot'), \
+             patch('pricepilot.core.database.get_calendar_price', return_value=None), \
+             patch('pricepilot.core.database.upsert_calendar_price'):
+            sync_property(1, 2, DAY, 3)
+        fake.calendar.assert_called_once_with(MAPPING, DAY, DAY + timedelta(days=31))
+        fake.bookings.assert_called_once_with(MAPPING, DAY - timedelta(days=90), DAY + timedelta(days=32))
 
 
 class PublicationTests(unittest.TestCase):

@@ -336,16 +336,12 @@ def render_integrations(account_id, property_id=None):
         finally:
             client.close()
     if st.button('Diagnostica GET proprietà Beds24', disabled=not credentials):
-        # Reload only this read-only diagnostic module so a Streamlit hot deploy
-        # cannot retain an obsolete client implementation in its module cache.
-        import importlib
-        import pricepilot.integrations.beds24 as beds24_module
-        beds24_module = importlib.reload(beds24_module)
-        client = beds24_module.Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''),
-                                             refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
+        from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
+        client = Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''),
+                              refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
         try:
             st.json(client.diagnose_properties(int(external), int(room)))
-        except beds24_module.Beds24Error as exc:
+        except Beds24Error as exc:
             st.error(str(exc))
         finally:
             client.close()
