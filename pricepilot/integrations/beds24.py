@@ -148,10 +148,16 @@ class Beds24Client:
         return rules[0]["id"]
 
     def diagnose_properties(self, property_id, room_id):
+        """Run the agreed read-only discovery sequence with sanitized output."""
         attempts = [{}, {"id": property_id}, {"id": property_id, "includePriceRules": "true"}]
         result = []
-        for params in attempts:
-            response = self._http.get("/properties", headers=self._headers(), params=params)
+        for index, params in enumerate(attempts):
+            try:
+                response = self._http.get("/properties", headers=self._headers(), params=params)
+            except httpx.HTTPError:
+                result.append({"endpoint": "/properties", "params": params, "status": None,
+                               "headers": {}, "body": {"detail": "Beds24 non raggiungibile"}})
+                break
             safe_headers = {key: response.headers.get(key) for key in
                 ("x-request-cost", "x-fivemincreditlimit-remaining", "x-fivemincreditlimit-resetsin")
                 if response.headers.get(key) is not None}
@@ -161,9 +167,19 @@ class Beds24Client:
                 body = {"detail": "Risposta non JSON"}
             if response.status_code >= 400:
                 body = {"detail": str(body.get("message") or body.get("error") or body.get("detail") or "Errore Beds24")[:300]} if isinstance(body, dict) else {"detail": "Errore Beds24"}
+                result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
+                               "headers": safe_headers, "body": body})
+                break
+            records = body.get("data", []) if isinstance(body, dict) else []
+            property_record = next((item for item in records if isinstance(item, dict) and item.get("id") == property_id), None)
+            rooms = ((property_record or {}).get("roomTypes") or (property_record or {}).get("rooms") or [])
+            room_present = any(isinstance(room, dict) and room.get("id") == room_id for room in rooms)
+            summary = {"type": body.get("type") if isinstance(body, dict) else None,
+                       "count": len(records), "property_present": property_record is not None,
+                       "room_present": room_present}
             result.append({"endpoint": "/properties", "params": params, "status": response.status_code,
-                           "headers": safe_headers, "body": body if response.status_code >= 400 else {"type": body.get("type"), "count": len(body.get("data", []))}})
-            if response.status_code >= 400:
+                           "headers": safe_headers, "body": summary})
+            if index < len(attempts) - 1 and not (summary["property_present"] and summary["room_present"]):
                 break
         return result
 
