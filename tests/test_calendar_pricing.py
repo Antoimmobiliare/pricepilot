@@ -155,7 +155,8 @@ class CalendarWorkflowTests(unittest.TestCase):
         CONFIG['db_path'] = str(Path(temporary)/'calendar.db')
         self.stack.callback(lambda: CONFIG.update(db_path=old_db))
         self.stack.enter_context(patch.dict(os.environ, {'PRICEPILOT_ENV': 'staging',
-            'PRICEPILOT_DATA_PROVIDER': 'unconfigured', 'PRICEPILOT_DATABASE_BACKEND': 'sqlite'}))
+            'PRICEPILOT_DATA_PROVIDER': 'unconfigured', 'PRICEPILOT_DATABASE_BACKEND': 'sqlite',
+            'PRICEPILOT_ALLOW_CHANNEL_WRITES': '1'}))
         db.init_db()
         account = db.create_account('Calendar fixture', plan='pro', billing_status='active')
         self.account_id = account['id']
@@ -247,6 +248,30 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.assertTrue(outcome['approved'])
         self.assertFalse(outcome['applied'])
         self.assertEqual(outcome['status'], 'approved_sync_failed')
+
+    def test_write_gate_zero_keeps_approval_pending_without_claim_or_write(self):
+        result = self.run_decision()
+        with patch.dict(os.environ, {'PRICEPILOT_ALLOW_CHANNEL_WRITES': '0'}):
+            outcome = engine.approve_decision(result['log_id'], self.account_id)
+        self.assertEqual(outcome['status'], 'write_gate_blocked')
+        self.assertFalse(outcome['applied'])
+        self.channel.assert_not_called()
+        row = db.get_decision_log_entry(result['log_id'], self.account_id)
+        self.assertTrue(row['decision'].startswith('PENDING_APPROVAL'))
+        self.assertFalse('[APPLYING]' in row['decision'])
+
+    def test_approval_claim_is_scoped_to_one_pending_decision(self):
+        first = self.run_decision()
+        second_day = self.day + timedelta(days=1)
+        db.upsert_calendar_price({**self.calendar, 'date': second_day.isoformat()})
+        second = engine.process_decision(property_id=self.prop['id'], target_date=second_day,
+                                         force_mode='auto', account_id=self.account_id)
+        self.assertNotEqual(first['log_id'], second['log_id'])
+        self.assertTrue(engine.approve_decision(first['log_id'], self.account_id)['applied'])
+        self.assertEqual(self.channel.call_count, 1)
+        untouched = db.get_decision_log_entry(second['log_id'], self.account_id)
+        self.assertTrue(untouched['decision'].startswith('PENDING_APPROVAL'))
+        self.assertFalse(untouched['applied'])
 
     def test_unknown_inventory_blocks_without_querying_market(self):
         self.inventory.estimate.side_effect = DataUnavailable('Synthetic missing calendar')

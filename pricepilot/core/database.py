@@ -2204,6 +2204,16 @@ def claim_decision_application(log_id: int, account_id: int, expected: str) -> b
         return cur.rowcount == 1
 
 
+def release_decision_claim(log_id: int, account_id: int, expected: str) -> bool:
+    """Restore a claim when the master write gate blocks before side effect."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE decision_log SET decision=? WHERE id=? AND account_id=? AND applied=0 AND decision=?",
+            (expected, log_id, account_id, expected + " [APPLYING]"),
+        )
+        return cur.rowcount == 1
+
+
 def update_decision_state(
     log_id: int,
     *,

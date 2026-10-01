@@ -646,6 +646,7 @@ def _channel_manager_update(prop: Dict, new_price: float, d: date) -> Dict:
     if not demo_enabled() and os.getenv("PRICEPILOT_ALLOW_CHANNEL_WRITES") != "1":
         return {"ok": False, "is_real": False, "platform": "disabled", "listing_id": "",
                 "attempted": False,
+                "error_code": "write_gate_disabled",
                 "error": "Invio prezzi disabilitato fino al collaudo dei collegamenti."}
     try:
         result = get_channel_manager_provider().update_price(
@@ -939,9 +940,21 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
                 return {"approved": False, "applied": False, "status": "expired_or_missing_data", "message": "Proposta scaduta o dati/regole cambiati: ricalcolare prima di approvare."}
         if not float(prop["min_price"]) <= new_price <= float(prop["max_price"]):
             return {"approved": False, "applied": False, "status": "limits_changed"}
+        # Check the master kill switch only after all read-only safety checks,
+        # but before the atomic claim. A blocked approval remains pending.
+        if not demo_enabled() and os.getenv("PRICEPILOT_ALLOW_CHANNEL_WRITES") != "1":
+            return {"approved": False, "applied": False, "status": "write_gate_blocked",
+                    "message": "Scrittura disabilitata dal master write gate; decisione ancora pending."}
         if not claim_decision_application(log_id, row_account_id, decision):
             return {"approved": False, "applied": False, "status": "already_claimed"}
         cm_result = _channel_manager_update(prop, new_price, target_date)
+        if cm_result.get("error_code") == "write_gate_disabled":
+            # The gate may change concurrently; do not consume an approval if
+            # the external side effect was not permitted.
+            from pricepilot.core.database import release_decision_claim
+            release_decision_claim(log_id, row_account_id, decision)
+            return {"approved": False, "applied": False, "status": "write_gate_blocked",
+                    "message": "Scrittura disabilitata dal master write gate; decisione ancora pending."}
     else:
         cm_result = {
             "ok": False,
