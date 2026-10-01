@@ -30,7 +30,7 @@ import secrets
 import logging
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("pricepilot.telegram_bot")
@@ -253,12 +253,103 @@ def send_approval_request(
     return result
 
 
+def create_test_approval(property_id: int, account_id: int) -> Dict:
+    """Create and deliver one explicitly sandboxed Telegram approval.
+
+    This path is deliberately separate from the pricing engine: it can only
+    select a fresh, open Beds24 snapshot row at the reference price (EUR 89),
+    and its callbacks never call the channel-manager writer.
+    """
+    from pricepilot.core.database import save_decision_log
+    from pricepilot.services.operational_store import get_snapshot
+    from pricepilot.core.database import get_property
+
+    prop = get_property(int(property_id), account_id=int(account_id))
+    link = _decision_link_for_property(int(property_id))
+    if not prop or not link or not link.get("chat_id"):
+        raise ValueError("Telegram non collegato alla proprietà richiesta.")
+    snapshot = get_snapshot(int(account_id), int(property_id))
+    if not snapshot or not snapshot.get("valid"):
+        raise ValueError("Snapshot Beds24 assente o non valido.")
+    try:
+        observed = datetime.fromisoformat(str(snapshot["observed_at"]).replace("Z", "+00:00"))
+        if observed.tzinfo is None or not 0 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 6 * 3600:
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("Snapshot Beds24 assente, scaduto o non verificabile.") from None
+    today = date.today().isoformat()
+    reservations = snapshot.get("reservations") or []
+    candidates = []
+    for row in snapshot.get("inventory") or []:
+        day = str(row.get("date") or "")
+        if day < today or row.get("state") != "open" or row.get("current_price") is None:
+            continue
+        if abs(float(row.get("current_price")) - 89.0) > 0.005:
+            continue
+        if row.get("arrival_restriction", "none") != "none" or row.get("booking_id"):
+            continue
+        try:
+            target = date.fromisoformat(day)
+        except ValueError:
+            continue
+        if any(b.get("status") in {"confirmed", "new", "request", "black"}
+               and str(b.get("arrival", "")) <= day < str(b.get("departure", "")) for b in reservations):
+            continue
+        candidates.append((target, row))
+    if not candidates:
+        raise ValueError("Nessuna notte futura libera a EUR 89 verificata nello snapshot.")
+    target, row = sorted(candidates, key=lambda item: item[0])[0]
+    entry = {
+        "account_id": int(account_id), "property_id": int(property_id),
+        "old_price": 89.0, "new_price": 91.0, "market_avg": None,
+        "occupancy": 0.0, "decision": "TEST_PENDING_APPROVAL", "mode": "approval",
+        "applied": 0, "notes": "TEST TECNICO SANDBOX: nessuna raccomandazione reale; nessuna scrittura Beds24.",
+        "date": target.isoformat(), "strategy": "test_sandbox", "factors": json.dumps({
+            "test_only": True, "availability": "open", "numAvail": 1,
+            "current_price": 89.0, "test_price": 91.0,
+            "observed_at": snapshot["observed_at"],
+        }), "current_price_source": "beds24_calendar", "data_source": "test_sandbox",
+    }
+    log_id = save_decision_log(entry)
+    response = send_test_approval_request(log_id, prop.get("name", "Proprietà"), target.isoformat(), 89.0, 91.0,
+                                          int(link["chat_id"]))
+    if not response.get("ok"):
+        raise ValueError("Telegram non ha confermato la consegna del test.")
+    return {"log_id": log_id, "property_id": int(property_id), "date": target.isoformat(),
+            "old_price": 89.0, "new_price": 91.0, "chat_id": int(link["chat_id"]), "telegram": response}
+
+
+def _decision_link_for_property(property_id: int) -> Optional[Dict]:
+    from pricepilot.core.database import get_telegram_link_by_property
+    return get_telegram_link_by_property(int(property_id))
+
+
+def send_test_approval_request(log_id: int, prop_name: str, target_date: str,
+                               old_price: float, new_price: float, chat_id: int) -> Dict:
+    """Send a clearly labelled sandbox approval; callbacks cannot write OTA."""
+    pct = (new_price - old_price) / max(old_price, 1) * 100
+    text = ("🧪 *PricePilot — TEST TECNICO SANDBOX*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏠 *Proprietà:* {prop_name}\n📅 *Notte:* {target_date}\n"
+            f"💰 *Prezzo corrente:* €{old_price:.2f}\n🎯 *Prezzo di test:* €{new_price:.2f} (`{pct:+.1f}%`)\n"
+            "✅ Snapshot Beds24: open, numAvail=1, nessuna prenotazione/override\n"
+            "⚠️ Questo è un test tecnico: non è una raccomandazione reale e non modifica Beds24.\n"
+            "━━━━━━━━━━━━━━━━━━━━\nConfermi il test del flusso approval?")
+    return _api_call("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": [[
+            {"text": "✅ Approva TEST", "callback_data": f"test_approve_{log_id}"},
+            {"text": "❌ Rifiuta TEST", "callback_data": f"test_reject_{log_id}"},
+        ]]}})
+
+
 def send_cycle_digest(account_id: int, results: list) -> dict:
     """One plain-text overview per property; each nightly change is approved separately."""
     from pricepilot.core.database import (get_property, get_telegram_link_by_property,
                                           get_notification_preferences, record_notification_log)
     grouped = {}
     for row in results:
+        if row.get('data_source') == 'test_sandbox':
+            continue
         if row.get('deduplicated') or row.get('calendar_status') in {'unchanged', 'locked'}:
             continue
         if row.get('mode') not in {'approval', 'advisory'}:
@@ -477,6 +568,62 @@ def _record_approval_event(
         logger.warning("Storico approvazione Telegram non salvato: %s", exc)
 
 
+def _handle_test_callback(callback_query_id: str, data: str, chat_id: int,
+                          message_id: int, original_text: str) -> None:
+    """Handle sandbox callbacks without invoking any operational writer."""
+    from pricepilot.core.database import get_decision_log_entry, update_decision_state
+    try:
+        action, raw_id = data.split("_", 2)[1:]
+        log_id = int(raw_id)
+    except (ValueError, IndexError):
+        answer_callback_query(callback_query_id, "Test non valido.")
+        return
+    context = _decision_context_for_chat(log_id, chat_id)
+    row = get_decision_log_entry(log_id, context["account_id"] if context else None)
+    if not context or not row or row.get("data_source") != "test_sandbox":
+        answer_callback_query(callback_query_id, "Test non disponibile per questa chat.")
+        return
+    if any(marker in original_text for marker in ("TEST APPROVATO", "TEST RIFIUTATO", "TEST BLOCCATO")):
+        answer_callback_query(callback_query_id, "Test gia gestito.")
+        return
+    try:
+        stamp = datetime.fromisoformat(str(row["timestamp"]).replace("Z", "+00:00"))
+        stamp = stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp
+        fresh = 0 <= (datetime.now(timezone.utc) - stamp).total_seconds() <= 30 * 60
+    except (KeyError, TypeError, ValueError):
+        fresh = False
+    valid_snapshot = False
+    if fresh:
+        try:
+            from pricepilot.services.operational_store import get_snapshot
+            snapshot = get_snapshot(int(context["account_id"]), int(context["property_id"]))
+            for item in (snapshot or {}).get("inventory") or []:
+                if (item.get("date") == row.get("date") and item.get("state") == "open"
+                        and item.get("booking_id") in (None, "")
+                        and item.get("arrival_restriction", "none") == "none"
+                        and abs(float(item.get("current_price")) - float(row.get("old_price"))) <= .005):
+                    valid_snapshot = True
+                    break
+        except (TypeError, ValueError, KeyError):
+            valid_snapshot = False
+    if not fresh or not valid_snapshot:
+        status = "TEST_BLOCKED_STALE_OR_CHANGED"
+        update_decision_state(log_id, account_id=context["account_id"], applied=False, decision=status)
+        answer_callback_query(callback_query_id, "Test bloccato: snapshot scaduto o cambiato.")
+        edit_message_text(chat_id, message_id, original_text + "\n\n*TEST BLOCCATO* — dati Beds24 cambiati o proposta scaduta.")
+        _record_approval_event(context=context, action=action, status=status, chat_id=chat_id,
+                               message_id=message_id, callback_query_id=callback_query_id)
+        return
+    status = "TEST_APPROVED_WRITE_GATE_BLOCKED" if action == "approve" else "TEST_REJECTED"
+    update_decision_state(log_id, account_id=context["account_id"], applied=False, decision=status)
+    answer_callback_query(callback_query_id, "Test approvato: write gate ancora disabilitato." if action == "approve" else "Test rifiutato.")
+    final = ("*TEST APPROVATO* — nessuna scrittura eseguita (`PRICEPILOT_ALLOW_CHANNEL_WRITES=0`)."
+             if action == "approve" else "*TEST RIFIUTATO* — nessuna scrittura eseguita.")
+    edit_message_text(chat_id, message_id, original_text + "\n\n" + final)
+    _record_approval_event(context=context, action=action, status=status, chat_id=chat_id,
+                           message_id=message_id, callback_query_id=callback_query_id)
+
+
 def _handle_callback(
     callback_query_id: str,
     data: str,
@@ -487,6 +634,10 @@ def _handle_callback(
     """Gestisce i pulsanti inline ✅ Approva / ❌ Rifiuta."""
     from pricepilot.core.database import mark_decision_rejected, update_calendar_status_for_decision
     from pricepilot.engine.decision_engine import approve_decision
+
+    if data.startswith("test_approve_") or data.startswith("test_reject_"):
+        _handle_test_callback(callback_query_id, data, chat_id, message_id, original_text)
+        return
 
     if data.startswith('review_'):
         try:

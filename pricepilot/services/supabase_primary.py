@@ -1120,7 +1120,7 @@ def get_pending_approvals(
     account_id: Optional[int] = None,
 ) -> list[Dict]:
     rows = get_decision_log(limit=500, property_id=property_id, account_id=account_id)
-    return [row for row in rows if str(row.get("mode")) == "approval" and not int(row.get("applied") or 0)
+    return [row for row in rows if row.get("data_source") != "test_sandbox" and str(row.get("mode")) == "approval" and not int(row.get("applied") or 0)
             and "[REJECTED]" not in str(row.get("decision") or "") and "[APPROVED" not in str(row.get("decision") or "")]
 
 

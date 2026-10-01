@@ -273,6 +273,45 @@ class CalendarWorkflowTests(unittest.TestCase):
 
 
 class TelegramCalendarWorkflowTests(unittest.TestCase):
+    def test_sandbox_approval_has_distinct_callbacks_and_no_operational_writer(self):
+        from pricepilot.services import telegram_bot
+        with patch.object(telegram_bot, '_api_call', return_value={'ok': True}) as send:
+            telegram_bot.send_test_approval_request(42, 'Luma Pisa', '2099-01-02', 89, 91, 44)
+        payload = send.call_args.args[1]
+        self.assertIn('TEST TECNICO SANDBOX', payload['text'])
+        self.assertIn('non è una raccomandazione reale', payload['text'])
+        buttons = payload['reply_markup']['inline_keyboard'][0]
+        self.assertEqual(buttons[0]['callback_data'], 'test_approve_42')
+        self.assertEqual(buttons[1]['callback_data'], 'test_reject_42')
+
+    def test_sandbox_approval_never_calls_channel_writer(self):
+        from pricepilot.services import telegram_bot
+        from datetime import datetime, timezone
+        row = {'id': 42, 'account_id': 3, 'property_id': 7, 'data_source': 'test_sandbox',
+               'decision': 'TEST_PENDING_APPROVAL', 'timestamp': datetime.now(timezone.utc).isoformat(),
+               'date': '2099-01-02', 'old_price': 89.0, 'new_price': 91.0}
+        snap = {'inventory': [{'date': '2099-01-02', 'state': 'open', 'booking_id': None,
+                               'arrival_restriction': 'none', 'current_price': 89.0}]}
+        with patch.object(telegram_bot, '_decision_context_for_chat', return_value={'id': 42, 'account_id': 3, 'property_id': 7}), \
+             patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
+             patch('pricepilot.services.operational_store.get_snapshot', return_value=snap), \
+             patch('pricepilot.core.database.update_decision_state') as update, \
+             patch.object(telegram_bot, '_record_approval_event'), \
+             patch.object(telegram_bot, 'answer_callback_query'), \
+             patch.object(telegram_bot, 'edit_message_text'), \
+             patch('pricepilot.engine.decision_engine.approve_decision', side_effect=AssertionError('writer path used')):
+            telegram_bot._handle_callback('cb', 'test_approve_42', 44, 55, 'TEST')
+        self.assertEqual(update.call_args.kwargs['decision'], 'TEST_APPROVED_WRITE_GATE_BLOCKED')
+
+    def test_sandbox_rows_are_excluded_from_operational_digest(self):
+        from pricepilot.services import telegram_bot
+        with patch.object(telegram_bot, 'is_configured', return_value=True), \
+             patch.object(telegram_bot, '_api_call') as send:
+            result = telegram_bot.send_cycle_digest(3, [{'property_id': 7, 'data_source': 'test_sandbox',
+                'mode': 'approval', 'calendar_status': 'pending_approval', 'date': '2099-01-02'}])
+        self.assertEqual(result, {'sent': 0, 'failed': 0})
+        send.assert_not_called()
+
     def test_ninety_nights_produce_one_digest_and_one_review_entry(self):
         from pricepilot.services import telegram_bot
         rows = [{'property_id': 7, 'property_name': 'Luma',

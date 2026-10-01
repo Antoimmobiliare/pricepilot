@@ -2162,7 +2162,7 @@ def get_pending_approvals(
     """Ritorna le decisioni in attesa di approvazione."""
     query = (
         "SELECT * FROM decision_log "
-        "WHERE mode='approval' AND applied=0 "
+        "WHERE mode='approval' AND applied=0 AND COALESCE(data_source,'') <> 'test_sandbox' "
         "AND decision NOT LIKE '%[APPROVED%' "
         "AND decision NOT LIKE '%[REJECTED]%'"
     )

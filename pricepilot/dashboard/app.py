@@ -6798,6 +6798,15 @@ def tab_telegram():
                         st.toast("Test Telegram inviato.", icon="✅")
                     except Exception as exc:
                         st.error(f"Errore invio test: {exc}")
+                if st.button("🧪 Approval sandbox", key=f"tg_approval_test_{prop_id}", width="stretch",
+                             help="Invia una proposta tecnica 89→91 su una notte Beds24 certificata; non può scrivere prezzi"):
+                    try:
+                        with st.spinner("Verifica snapshot e invio test approval..."):
+                            from pricepilot.services.telegram_bot import create_test_approval
+                            result = create_test_approval(prop_id, current_account_id())
+                        st.success(f"Test approval inviato per {result['date']}: €89 → €91. Nessuna scrittura possibile con il gate attuale.")
+                    except Exception as exc:
+                        st.error(f"Test approval non inviato: {exc}")
             with col_c:
                 if st.button("🔓 Scollega", key=f"rev_{prop_id}", width="stretch"):
                     revoke_telegram_link(prop_id)
