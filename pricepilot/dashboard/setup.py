@@ -413,6 +413,10 @@ def render_integrations(account_id, property_id=None):
                 f'({type(exc).__name__}). Nessuna scrittura avviata.'
             )
             st.caption(f'Diagnostica codice: {locations or "nessun frame"}')
+            if isinstance(exc, AttributeError):
+                missing = getattr(exc, 'name', None) or 'sconosciuto'
+                target_type = type(getattr(exc, 'obj', None)).__name__
+                st.caption(f'Diagnostica struttura: attributo={missing}; tipo_oggetto={target_type}')
         finally:
             client.close()
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')
