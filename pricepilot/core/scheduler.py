@@ -14,6 +14,20 @@ from types import SimpleNamespace
 logger = logging.getLogger("pricepilot.scheduler")
 
 
+def _cycle_timeout_seconds() -> float:
+    """Limite duro per un ciclo operativo, inclusi i lock cloud.
+
+    Un provider cloud degradato non deve lasciare una run ``running`` per
+    sempre. Il valore resta configurabile per worker lenti, ma ha un limite
+    minimo per evitare configurazioni accidentali non deterministiche.
+    """
+    try:
+        value = float(os.getenv("PRICEPILOT_CYCLE_TIMEOUT_SECONDS", "180"))
+    except (TypeError, ValueError):
+        value = 180.0
+    return max(1.0, min(value, 3600.0))
+
+
 def _event_context_for_property(event_provider, prop: dict, target_date: date, account_id: int) -> tuple[str, str]:
     """Resolve a normalized event type and a human label for one property."""
     event = None
@@ -113,7 +127,9 @@ def run_pricing_cycle(
     plan = get_plan(operational_plan() if operational_mode_enabled() else billing_plan.plan)
     effective_interval = float(plan.get("analysis_interval_hours") or interval_hours)
     next_run_at = (datetime.utcnow() + timedelta(hours=effective_interval)).isoformat()
-    stale_after_minutes = max(30, int(effective_interval * 60 * 2))
+    # A stale run must be reclaimable shortly after the deterministic cycle
+    # deadline, rather than waiting for the full six-hour analysis interval.
+    stale_after_minutes = max(5, int((_cycle_timeout_seconds() / 60) + 2))
     run_id, active_run = try_start_operation_run(
         account_id=account_id,
         source=source,
@@ -143,6 +159,7 @@ def run_pricing_cycle(
         }
     if run_id is None:
         raise RuntimeError("Impossibile avviare il ciclo pricing.")
+    cycle_deadline = time.monotonic() + _cycle_timeout_seconds()
     properties = get_properties(account_id=account_id)
     results = []
     errors = []
@@ -172,6 +189,8 @@ def run_pricing_cycle(
 
     try:
         for prop in properties:
+            if time.monotonic() >= cycle_deadline:
+                raise TimeoutError("Ciclo pricing oltre il limite operativo; nessuna nuova data analizzata.")
             if os.getenv("PRICEPILOT_CHANNEL_PROVIDER") == "beds24" and os.getenv("PRICEPILOT_OCCUPANCY_PROVIDER") == "observed_inventory":
                 try:
                     from pricepilot.services.beds24_sync import sync_property
@@ -180,6 +199,8 @@ def run_pricing_cycle(
                     errors.append({"property_id": prop["id"], "date": start_date.isoformat(), "error": str(exc), "stage": "inventory_sync"})
                     continue
             for offset in range(horizon):
+                if time.monotonic() >= cycle_deadline:
+                    raise TimeoutError("Ciclo pricing oltre il limite operativo; lock cloud non conclusivo.")
                 d = start_date + timedelta(days=offset)
                 try:
                     event_type, event_label = ("", "") if calendar_pricing_enabled() else _event_context_for_property(

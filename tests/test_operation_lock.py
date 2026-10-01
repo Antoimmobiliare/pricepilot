@@ -2,6 +2,7 @@ from datetime import date
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 from pricepilot.core import config
 from pricepilot.core.data_quality import DataUnavailable
@@ -26,3 +27,40 @@ class PricingDateLeaseTests(unittest.TestCase):
         day = date.today().isoformat()
         with pricing_date_lease(1, 2, day), pricing_date_lease(2, 2, day), pricing_date_lease(1, 3, day):
             pass
+
+    def test_cloud_rpc_acquire_release_and_contention(self):
+        responses = [True, False, True]
+        client = Mock()
+        def rpc(name, payload):
+            result = Mock()
+            result.execute.return_value = Mock(data=(responses.pop(0) if name.startswith("acquire") else True))
+            return result
+        client.rpc.side_effect = rpc
+        day = date.today().isoformat()
+        with patch("pricepilot.core.operation_lock.is_supabase_primary", return_value=True), \
+             patch("pricepilot.core.operation_lock.get_supabase_admin_client", return_value=client):
+            with pricing_date_lease(1, 2, day):
+                with self.assertRaises(DataUnavailable):
+                    with pricing_date_lease(1, 2, day):
+                        pass
+            with pricing_date_lease(1, 2, day):
+                pass
+        calls = [call.args[0] for call in client.rpc.call_args_list]
+        self.assertEqual(calls, [
+            "acquire_pricepilot_pricing_lock",
+            "acquire_pricepilot_pricing_lock",
+            "release_pricepilot_pricing_lock",
+            "acquire_pricepilot_pricing_lock",
+            "release_pricepilot_pricing_lock",
+        ])
+
+    def test_cloud_rpc_error_fails_closed_without_leaking_body(self):
+        client = Mock()
+        client.rpc.side_effect = RuntimeError("token=secret body=private")
+        day = date.today().isoformat()
+        with patch("pricepilot.core.operation_lock.is_supabase_primary", return_value=True), \
+             patch("pricepilot.core.operation_lock.get_supabase_admin_client", return_value=client):
+            with self.assertRaisesRegex(Exception, "Lock cloud RPC rifiutata") as ctx:
+                with pricing_date_lease(1, 2, day):
+                    pass
+        self.assertNotIn("secret", str(ctx.exception))

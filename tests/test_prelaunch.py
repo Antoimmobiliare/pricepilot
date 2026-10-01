@@ -233,6 +233,28 @@ class SchedulerHorizonTests(unittest.TestCase):
         self.assertEqual(len(result['errors']),3)
         self.assertEqual(result['errors'][1]['date'],(DAY+timedelta(days=1)).isoformat())
 
+    def test_cycle_deadline_finishes_run_when_lock_path_stalls(self):
+        from pricepilot.core import database, scheduler
+        from pricepilot.core.scheduler import run_pricing_cycle
+        provider = Mock(name='fixture_inventory')
+        provider.name = 'test_inventory'
+        provider.estimate.return_value = OccupancyResult(.5, 'test', {'target_state': 'open'})
+        finished = Mock(return_value={'id': 1, 'status': 'error'})
+        with patch.object(database, 'get_account', return_value={'plan': 'free', 'billing_status': 'dev'}), \
+             patch.object(database, 'get_properties', return_value=[{'id': 1, 'account_id': 1}]), \
+             patch.object(database, 'try_start_operation_run', return_value=(1, None)), \
+             patch.object(database, 'finish_operation_run', finished), \
+             patch.object(database, 'record_audit_event'), \
+             patch.object(scheduler, 'time') as clock, \
+             patch('pricepilot.providers.registry.get_occupancy_provider', return_value=provider), \
+             patch('pricepilot.engine.decision_engine.process_decision'):
+            clock.monotonic.side_effect = [0.0, 2.0]
+            with patch.dict(os.environ, {'PRICEPILOT_CYCLE_TIMEOUT_SECONDS': '1'}):
+                with self.assertRaises(TimeoutError):
+                    run_pricing_cycle(account_id=1, target_date=DAY, horizon_days=3)
+        finished.assert_called_once()
+        self.assertEqual(finished.call_args.kwargs['status'], 'error')
+
     def test_cloud_reports_child_failure(self):
         from pricepilot.core.scheduler import run_cloud_pricing_cycle
         with patch('pricepilot.core.database.get_properties',return_value=[{'account_id':1}]), patch('pricepilot.core.scheduler.run_pricing_cycle',return_value={'errors':[{'error':'missing'}]}):
