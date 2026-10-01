@@ -1,5 +1,6 @@
 """Account-scoped owner workflow. No credentials or invented market data in UI."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 import os
 from pathlib import Path
 
@@ -23,6 +24,52 @@ def _properties(account_id):
 @st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
 def _account(account_id):
     return get_account(int(account_id))
+
+
+def _bounded_precheck_read_only(client, mapping, target_day):
+    """Bounded Beds24 GET-only check for mixed-version Streamlit deployments."""
+    calendar_rows = client.calendar(mapping, target_day, target_day)
+    hits = []
+    for room in calendar_rows:
+        if not isinstance(room, dict) or not isinstance(room.get('calendar'), list):
+            raise ValueError('calendar response structure')
+        if room.get('roomId') != mapping['room_id']:
+            raise ValueError('calendar room mapping')
+        for row in room['calendar']:
+            if not isinstance(row, dict):
+                raise ValueError('calendar day structure')
+            first = date.fromisoformat(row['from'])
+            last = date.fromisoformat(row.get('to') or row['from'])
+            if first <= target_day <= last:
+                hits.append(row)
+    if len(hits) != 1:
+        raise ValueError('calendar date missing or ambiguous')
+    bookings = client.bookings(mapping, target_day, target_day + timedelta(days=1))
+    overlaps = []
+    for booking in bookings:
+        arrival = date.fromisoformat(booking['arrival'])
+        departure = date.fromisoformat(booking['departure'])
+        if booking.get('status') not in {'cancelled', 'inquiry'} and arrival <= target_day < departure:
+            overlaps.append({'id': booking.get('id'), 'status': booking.get('status')})
+    row = hits[0]
+    result = {
+        'date': target_day.isoformat(), 'property_id': mapping['beds24_property_id'],
+        'room_id': mapping['room_id'], 'price_slot': mapping['price_slot'],
+        'price': row.get(f"price{mapping['price_slot']}"),
+        'numAvail': row.get('numAvail'), 'minStay': row.get('minStay'),
+        'override': row.get('override'), 'booking_overlap': bool(overlaps),
+        'bookings': overlaps, 'observed_at': datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        price_ok = Decimal(str(result['price'])) == Decimal('89.00')
+    except (TypeError, ValueError):
+        price_ok = False
+    result['certified'] = bool(
+        price_ok and type(result['numAvail']) is int and result['numAvail'] == 1
+        and type(result['minStay']) is int and result['minStay'] == 1
+        and result['override'] == 'none' and not result['booking_overlap']
+    )
+    return result
 
 
 def render_sidebar(account_id):
@@ -372,7 +419,8 @@ def render_integrations(account_id, property_id=None):
                               refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
         try:
             with st.spinner('Pre-check Beds24 bounded in sola lettura…'):
-                check = client.bounded_precheck(mapping, target_day)
+                bounded = getattr(client, 'bounded_precheck', None)
+                check = bounded(mapping, target_day) if callable(bounded) else _bounded_precheck_read_only(client, mapping, target_day)
             diagnostic_stage = 'render_check'
             st.json(check)
             if not check.get('certified'):
