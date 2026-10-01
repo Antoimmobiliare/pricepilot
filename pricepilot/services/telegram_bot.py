@@ -279,6 +279,8 @@ def create_test_approval(property_id: int, account_id: int) -> Dict:
         raise ValueError("Snapshot Beds24 assente, scaduto o non verificabile.") from None
     today = date.today().isoformat()
     reservations = snapshot.get("reservations") or []
+    from pricepilot.providers.registry import get_event_provider
+    event_provider = get_event_provider()
     candidates = []
     for row in snapshot.get("inventory") or []:
         day = str(row.get("date") or "")
@@ -286,11 +288,14 @@ def create_test_approval(property_id: int, account_id: int) -> Dict:
             continue
         if abs(float(row.get("current_price")) - 89.0) > 0.005:
             continue
-        if row.get("arrival_restriction", "none") != "none" or row.get("booking_id"):
+        if (row.get("arrival_restriction", "none") != "none" or row.get("booking_id")
+                or type(row.get("min_stay")) is not int or row.get("min_stay") < 1):
             continue
         try:
             target = date.fromisoformat(day)
         except ValueError:
+            continue
+        if event_provider.event_for_property(prop=prop, target_date=target, account_id=int(account_id)):
             continue
         if any(b.get("status") in {"confirmed", "new", "request", "black"}
                and str(b.get("arrival", "")) <= day < str(b.get("departure", "")) for b in reservations):
