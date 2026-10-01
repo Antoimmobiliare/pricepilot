@@ -366,16 +366,19 @@ def render_integrations(account_id, property_id=None):
         from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
         from pricepilot.engine.decision_engine import process_decision
         target_day = date(2026, 10, 4)
+        diagnostic_stage = 'bounded_get'
         client = Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''),
                               refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
         try:
             with st.spinner('Pre-check Beds24 bounded in sola lettura…'):
                 check = client.bounded_precheck(mapping, target_day)
+            diagnostic_stage = 'render_check'
             st.json(check)
             if not check.get('certified'):
                 st.error('Pre-check non certificato: nessuna proposta e nessuna scrittura avviata.')
             else:
                 try:
+                    diagnostic_stage = 'pricing_engine'
                     with st.spinner('Esecuzione del normale pricing engine…'):
                         decision = process_decision(property_id=int(prop['id']),
                                                     target_date=target_day,
@@ -387,14 +390,16 @@ def render_integrations(account_id, property_id=None):
                     st.error(f'Pricing engine non riuscito ({type(exc).__name__}). Nessuna proposta inviata e nessuna scrittura avviata.')
                     decision = None
                 if decision is None:
+                    diagnostic_stage = 'finalize'
                     client.close()
                     return
+                diagnostic_stage = 'render_result'
                 st.success(f"Proposta live creata: €{decision['old_price']:.2f} → €{decision['recommended_price']:.2f}. In attesa di approvazione Telegram.")
                 st.json({'precheck': check, 'decision': decision})
         except Beds24Error as exc:
             st.error(f'Pre-check bounded non riuscito: {exc}. Nessuna proposta e nessuna scrittura avviata.')
         except Exception as exc:
-            st.error(f'Pre-check/pricing non riuscito ({type(exc).__name__}). Nessuna scrittura avviata.')
+            st.error(f'Pre-check/pricing non riuscito nella fase {diagnostic_stage} ({type(exc).__name__}). Nessuna scrittura avviata.')
         finally:
             client.close()
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')
