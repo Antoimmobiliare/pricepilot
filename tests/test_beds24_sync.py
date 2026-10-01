@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
+from pricepilot.integrations.beds24 import Beds24Client, Beds24Error, Beds24DeadlineExceeded
 from pricepilot.services.beds24_sync import normalize_snapshot, publish_snapshot, sync_property
 from pricepilot.core.plans import effective_sync_mode
 
@@ -183,6 +183,13 @@ class PublicationTests(unittest.TestCase):
 
 
 class ClientProtocolTests(unittest.TestCase):
+    def test_calendar_deadline_fails_closed_before_network(self):
+        mapping = {'beds24_property_id': 357389, 'room_id': 736801, 'price_slot': 1}
+        client = Beds24Client(transport=httpx.MockTransport(lambda req: self.fail('network must not be called')))
+        self.addCleanup(client.close)
+        with self.assertRaises(Beds24DeadlineExceeded):
+            client.calendar(mapping, DAY, DAY, deadline=0)
+
     def test_calendar_uses_property_and_room_scope_without_record_property_id(self):
         mapping = {'beds24_property_id': 357389, 'room_id': 736801, 'price_slot': 1}
 

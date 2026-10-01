@@ -24,6 +24,10 @@ class Beds24Error(RuntimeError):
     pass
 
 
+class Beds24DeadlineExceeded(Beds24Error, TimeoutError):
+    """The read-only acquisition exceeded the caller's cycle deadline."""
+
+
 def _validated_mapping(value, account_id, property_id):
     if not isinstance(value, dict) or (value.get('account_id'), value.get('property_id')) != (account_id, property_id):
         raise Beds24Error("Connessione Beds24 fuori dal perimetro richiesto.")
@@ -75,6 +79,13 @@ class Beds24Client:
         self._http.close()
 
     def _request(self, method, path, **kwargs):
+        deadline = kwargs.pop("deadline", None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise Beds24DeadlineExceeded("Beds24 acquisizione oltre il limite del ciclo.")
+        if deadline is not None:
+            remaining = max(0.05, deadline - time.monotonic())
+            configured = kwargs.get("timeout")
+            kwargs["timeout"] = min(float(configured or 20), remaining)
         try:
             response = self._http.request(method, path, **kwargs)
         except httpx.HTTPError:
@@ -92,11 +103,13 @@ class Beds24Client:
             raise Beds24Error("Beds24 ha rifiutato la richiesta.")
         return payload
 
-    def _headers(self):
+    def _headers(self, deadline=None):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise Beds24DeadlineExceeded("Beds24 acquisizione oltre il limite del ciclo.")
         if not self._token or time.monotonic() >= self._expires:
             if not self._refresh:
                 raise Beds24Error("Credenziale Beds24 non configurata.")
-            reply = self._request("GET", "/authentication/token", headers={"refreshToken": self._refresh})
+            reply = self._request("GET", "/authentication/token", headers={"refreshToken": self._refresh}, deadline=deadline)
             try:
                 self._token = reply["token"]
                 lifetime = int(reply["expiresIn"])
@@ -107,10 +120,12 @@ class Beds24Client:
                 raise Beds24Error("Risposta autenticazione Beds24 non valida.") from None
         return {"token": self._token}
 
-    def _pages(self, path, params):
+    def _pages(self, path, params, deadline=None):
         result = []
         for page in range(1, 101):
-            reply = self._request("GET", path, headers=self._headers(), params={**params, "page": page})
+            if deadline is not None and time.monotonic() >= deadline:
+                raise Beds24DeadlineExceeded("Beds24 acquisizione oltre il limite del ciclo.")
+            reply = self._request("GET", path, headers=self._headers(deadline), params={**params, "page": page}, deadline=deadline)
             if not isinstance(reply, dict) or not isinstance(reply.get("data"), list):
                 raise Beds24Error("Risposta Beds24 incompleta.")
             pages = reply.get('pages', {})
@@ -122,11 +137,11 @@ class Beds24Client:
                 return result
         raise Beds24Error("Paginazione Beds24 incompleta: nessun dato parziale dichiarato completo.")
 
-    def calendar(self, mapping, start, end):
+    def calendar(self, mapping, start, end, deadline=None):
         rows = self._pages("/inventory/rooms/calendar", {
             "propertyId": mapping["beds24_property_id"], "roomId": mapping["room_id"],
             "startDate": start.isoformat(), "endDate": end.isoformat(),
-            "includePrices": "true", "includeNumAvail": "true", "includeOverride": "true", "includeMinStay": "true"})
+            "includePrices": "true", "includeNumAvail": "true", "includeOverride": "true", "includeMinStay": "true"}, deadline=deadline)
         # Beds24 V2 calendar records carry roomId but do not include propertyId.
         # Property scope is enforced by the request itself; retain the room guard.
         if any(r.get("roomId") != mapping["room_id"] for r in rows):
@@ -205,9 +220,9 @@ class Beds24Client:
                 break
         return result
 
-    def bookings(self, mapping, start, end):
+    def bookings(self, mapping, start, end, deadline=None):
         rows = self._pages("/bookings", {"propertyId": mapping["beds24_property_id"],
-            "roomId": mapping["room_id"], "arrivalTo": end.isoformat(), "departureFrom": start.isoformat()})
+            "roomId": mapping["room_id"], "arrivalTo": end.isoformat(), "departureFrom": start.isoformat()}, deadline=deadline)
         if any(r.get("roomId") != mapping["room_id"] or r.get("propertyId") != mapping["beds24_property_id"] for r in rows):
             raise Beds24Error("Prenotazioni Beds24 fuori dal mapping richiesto.")
         # Return only operational fields: no guest contacts, payment details or messages.

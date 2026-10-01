@@ -179,7 +179,7 @@ def publish_snapshot(rows, mapping):
         lock.unlink()
 
 
-def sync_property(account_id, property_id, start, horizon_days=90):
+def sync_property(account_id, property_id, start, horizon_days=90, deadline=None):
     from pricepilot.services.operational_store import save_snapshot, invalidate_snapshot
     mapping = load_mapping(account_id,property_id)
     end = start + timedelta(days=horizon_days+29)  # Last pricing date needs its complete 30-day occupancy window.
@@ -195,12 +195,18 @@ def sync_property(account_id, property_id, start, horizon_days=90):
                         refresh_token=os.getenv(mapping.get("refresh_token_env",""),""))
     try:
         try:
-            cal=client.calendar(mapping,calendar_start,end-timedelta(days=1))
+            calendar_args = (mapping, calendar_start, end - timedelta(days=1))
+            cal = client.calendar(*calendar_args, **({"deadline": deadline} if deadline is not None else {}))
         except Beds24Error as exc:
+            if isinstance(exc, TimeoutError):
+                raise
             raise Beds24Error(f"calendar_get: {exc}") from None
         try:
-            bookings=client.bookings(mapping,bookings_start,end)
+            bookings_args = (mapping, bookings_start, end)
+            bookings = client.bookings(*bookings_args, **({"deadline": deadline} if deadline is not None else {}))
         except Beds24Error as exc:
+            if isinstance(exc, TimeoutError):
+                raise
             raise Beds24Error(f"bookings_get: {exc}") from None
         observed_at=datetime.now(timezone.utc).isoformat()
         try:

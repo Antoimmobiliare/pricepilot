@@ -20,6 +20,19 @@ logger = logging.getLogger("pricepilot.supabase")
 _STREAMLIT_CLIENT_KEY = "_pp_supabase_client"
 
 
+def _client_options() -> Any:
+    """Bound every PostgREST/RPC call used by a pricing cycle."""
+    try:
+        from supabase.lib.client_options import SyncClientOptions
+        return SyncClientOptions(
+            postgrest_client_timeout=15,
+            storage_client_timeout=15,
+            function_client_timeout=15,
+        )
+    except Exception:
+        return None
+
+
 def _setting(name: str) -> str:
     """Legge una configurazione senza esporre mai il valore nei log.
 
@@ -100,7 +113,8 @@ def get_supabase_client(*, use_auth_session: bool = True) -> Any | None:
     client = _streamlit_cached_client()
     if client is None:
         try:
-            client = create_client(url, key)
+            options = _client_options()
+            client = create_client(url, key, options=options) if options is not None else create_client(url, key)
         except Exception as exc:
             logger.warning("Impossibile creare il client Supabase: %s", exc)
             return None
@@ -131,17 +145,12 @@ def get_supabase_admin_client() -> Any | None:
 
     try:
         from supabase import create_client
-        from supabase.lib.client_options import SyncClientOptions
         # A pricing cycle may acquire one lease per future date.  Keep an
         # unavailable RPC from blocking the Streamlit session for the default
         # 120 seconds on every date; the caller records a sanitized error and
         # leaves all channel writes disabled.
-        options = SyncClientOptions(
-            postgrest_client_timeout=15,
-            storage_client_timeout=15,
-            function_client_timeout=15,
-        )
-        return create_client(url, key, options=options)
+        options = _client_options()
+        return create_client(url, key, options=options) if options is not None else create_client(url, key)
     except Exception as exc:
         logger.warning("Impossibile creare il client Supabase service role: %s", exc)
         return None

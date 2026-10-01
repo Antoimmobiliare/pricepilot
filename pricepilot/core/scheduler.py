@@ -14,6 +14,17 @@ from types import SimpleNamespace
 logger = logging.getLogger("pricepilot.scheduler")
 
 
+def _checkpoint(stage: str, *, run_id: int, account_id: int, property_id=None, target_date=None, **details) -> None:
+    """Emit bounded, sanitized lifecycle diagnostics without remote writes."""
+    context = {"stage": stage, "run_id": run_id, "account_id": account_id}
+    if property_id is not None:
+        context["property_id"] = property_id
+    if target_date is not None:
+        context["target_date"] = str(target_date)
+    context.update({str(k): str(v)[:120] for k, v in details.items()})
+    logger.info("pricing_cycle_checkpoint %s", context)
+
+
 def _cycle_timeout_seconds() -> float:
     """Limite duro per un ciclo operativo, inclusi i lock cloud.
 
@@ -160,6 +171,7 @@ def run_pricing_cycle(
     if run_id is None:
         raise RuntimeError("Impossibile avviare il ciclo pricing.")
     cycle_deadline = time.monotonic() + _cycle_timeout_seconds()
+    _checkpoint("run_started", run_id=run_id, account_id=account_id)
     properties = get_properties(account_id=account_id)
     results = []
     errors = []
@@ -194,14 +206,19 @@ def run_pricing_cycle(
             if os.getenv("PRICEPILOT_CHANNEL_PROVIDER") == "beds24" and os.getenv("PRICEPILOT_OCCUPANCY_PROVIDER") == "observed_inventory":
                 try:
                     from pricepilot.services.beds24_sync import sync_property
-                    sync_property(account_id, int(prop["id"]), start_date, horizon)
+                    _checkpoint("calendar_sync_start", run_id=run_id, account_id=account_id, property_id=prop["id"])
+                    sync_property(account_id, int(prop["id"]), start_date, horizon, deadline=cycle_deadline)
+                    _checkpoint("calendar_sync_complete", run_id=run_id, account_id=account_id, property_id=prop["id"])
                 except Exception as exc:
+                    if isinstance(exc, TimeoutError):
+                        raise
                     errors.append({"property_id": prop["id"], "date": start_date.isoformat(), "error": str(exc), "stage": "inventory_sync"})
                     continue
             for offset in range(horizon):
                 if time.monotonic() >= cycle_deadline:
                     raise TimeoutError("Ciclo pricing oltre il limite operativo; lock cloud non conclusivo.")
                 d = start_date + timedelta(days=offset)
+                _checkpoint("date_start", run_id=run_id, account_id=account_id, property_id=prop["id"], target_date=d)
                 try:
                     event_type, event_label = ("", "") if calendar_pricing_enabled() else _event_context_for_property(
                         event_provider,
@@ -297,7 +314,8 @@ def run_pricing_cycle(
             details=summary,
         )
         return {"run": run, "results": results, "errors": errors}
-    except Exception as exc:
+    except BaseException as exc:
+        _checkpoint("run_failed", run_id=run_id, account_id=account_id, error=type(exc).__name__)
         run = finish_operation_run(
             run_id=run_id,
             status="error",
