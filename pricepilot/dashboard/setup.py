@@ -1,6 +1,7 @@
 """Account-scoped owner workflow. No credentials or invented market data in UI."""
 from datetime import date, timedelta
 import os
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -399,7 +400,19 @@ def render_integrations(account_id, property_id=None):
         except Beds24Error as exc:
             st.error(f'Pre-check bounded non riuscito: {exc}. Nessuna proposta e nessuna scrittura avviata.')
         except Exception as exc:
-            st.error(f'Pre-check/pricing non riuscito nella fase {diagnostic_stage} ({type(exc).__name__}). Nessuna scrittura avviata.')
+            # Expose only code locations for bounded diagnostics; never render
+            # exception text or locals because provider errors may contain secrets.
+            import traceback
+            frames = traceback.extract_tb(exc.__traceback__)
+            locations = ' > '.join(
+                f'{Path(frame.filename).name}:{frame.lineno}:{frame.name}'
+                for frame in frames[-4:]
+            )
+            st.error(
+                f'Pre-check/pricing non riuscito nella fase {diagnostic_stage} '
+                f'({type(exc).__name__}). Nessuna scrittura avviata.'
+            )
+            st.caption(f'Diagnostica codice: {locations or "nessun frame"}')
         finally:
             client.close()
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')
