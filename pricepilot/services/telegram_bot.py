@@ -34,6 +34,9 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("pricepilot.telegram_bot")
+# Bump this module marker when the Telegram delivery path changes so hosted
+# Streamlit runtimes invalidate any previously loaded module copy.
+TELEGRAM_DELIVERY_MODULE_VERSION = "2026-10-01-pending-delivery"
 
 WEBHOOK_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
