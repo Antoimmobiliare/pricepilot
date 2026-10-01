@@ -253,6 +253,65 @@ def send_approval_request(
     return result
 
 
+def send_existing_pending_approval(log_id: int, account_id: int) -> Dict:
+    """Deliver one existing live pending decision, without creating a duplicate.
+
+    This is intentionally limited to the notification leg.  It never reads or
+    writes a channel manager and refuses sandbox, applied, rejected or already
+    delivered decisions.
+    """
+    from pricepilot.core.database import (
+        get_decision_log_entry, get_property, get_telegram_link_by_property,
+        get_notification_preferences, record_notification_log,
+    )
+
+    row = get_decision_log_entry(int(log_id), account_id=int(account_id))
+    if not row:
+        return {"ok": False, "error": "decision_not_found"}
+    decision = str(row.get("decision") or "")
+    if row.get("data_source") == "test_sandbox":
+        return {"ok": False, "error": "sandbox_decision_not_operational"}
+    if row.get("applied") or not decision.startswith("PENDING_APPROVAL") or any(
+        tag in decision for tag in ("[REJECTED]", "[APPROVED", "[APPLYING]")
+    ):
+        return {"ok": False, "error": "decision_not_pending"}
+    if row.get("tg_message_id"):
+        return {"ok": True, "already_sent": True,
+                "message_id": str(row.get("tg_message_id"))}
+
+    property_id = int(row.get("property_id") or 0)
+    prop = get_property(property_id, account_id=int(account_id))
+    link = get_telegram_link_by_property(property_id)
+    prefs = get_notification_preferences(int(account_id), property_id)
+    if not prop or not link or not link.get("chat_id"):
+        return {"ok": False, "error": "telegram_chat_not_connected"}
+    if not int(prefs.get("telegram_enabled", 1)) or not int(prefs.get("approval_alerts", 1)):
+        return {"ok": False, "error": "telegram_notifications_disabled"}
+
+    result = send_approval_request(
+        log_id=int(log_id), prop_name=prop.get("name", "Proprieta"),
+        old_price=float(row.get("old_price") or 0), new_price=float(row.get("new_price") or 0),
+        occupancy=float(row.get("occupancy") or 0), market_avg=row.get("market_avg"),
+        event="", chat_id=link["chat_id"], reason=str(row.get("notes") or ""),
+        target_date=str(row.get("date") or ""),
+    )
+    message_id = (result.get("result") or {}).get("message_id") if result.get("ok") else None
+    if not result.get("ok") or not message_id:
+        safe_error = str(result.get("error") or "telegram_message_id_missing")
+        record_notification_log(
+            event_type="approval_request", status="failed", account_id=int(account_id),
+            property_id=property_id, recipient=str(link["chat_id"]), error=safe_error,
+            payload={"log_id": int(log_id), "new_price": row.get("new_price")},
+        )
+        return {"ok": False, "error": safe_error}
+    record_notification_log(
+        event_type="approval_request", status="sent", account_id=int(account_id),
+        property_id=property_id, recipient=str(link["chat_id"]),
+        message_id=str(message_id), payload={"log_id": int(log_id), "new_price": row.get("new_price")},
+    )
+    return {"ok": True, "message_id": str(message_id), "log_id": int(log_id)}
+
+
 def create_test_approval(property_id: int, account_id: int) -> Dict:
     """Create and deliver one explicitly sandboxed Telegram approval.
 

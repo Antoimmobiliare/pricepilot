@@ -6909,7 +6909,7 @@ def tab_telegram():
                 elif _xpt.startswith("event="):
                     _evt_vt = _xpt.split("=",1)[1].strip()
 
-            ca, cb, cc = st.columns([4, 1, 1])
+            ca, cb, cc, cd = st.columns([4, 1, 1, 1])
             with ca:
                 pct_col_t = "#155724" if pct > 0 else "#721c24"
                 st.markdown(
@@ -6968,6 +6968,23 @@ def tab_telegram():
                     })
                     st.toast("Rifiutato.", icon="❌")
                     st.rerun()
+            with cd:
+                if not p.get("tg_message_id"):
+                    if st.button("📤", key=f"resend_tg_{p['id']}",
+                                 help="Invia la proposta pendente su Telegram", width="stretch"):
+                        try:
+                            from pricepilot.services.telegram_bot import send_existing_pending_approval
+                            with st.spinner("Invio proposta Telegram…"):
+                                delivery = send_existing_pending_approval(
+                                    int(p["id"]), int(current_account_id())
+                                )
+                            if not delivery.get("ok"):
+                                raise ValueError(delivery.get("error", "invio non confermato"))
+                            st.success(f"Telegram confermato (message_id {delivery['message_id']}).")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Invio Telegram non confermato: {exc}")
             st.divider()
     else:
         st.success("✅ Nessuna approvazione in sospeso.")

@@ -273,6 +273,43 @@ class CalendarWorkflowTests(unittest.TestCase):
 
 
 class TelegramCalendarWorkflowTests(unittest.TestCase):
+    def test_existing_pending_approval_is_delivered_once_and_returns_message_id(self):
+        from pricepilot.services import telegram_bot
+        row = {'id': 52, 'account_id': 11, 'property_id': 11,
+               'decision': 'PENDING_APPROVAL: 89.00->93.45 (+5.0%)',
+               'applied': 0, 'data_source': 'beds24_observation',
+               'old_price': 89.0, 'new_price': 93.45, 'occupancy': .2,
+               'market_avg': None, 'date': '2026-10-04', 'notes': 'calendar rule'}
+        with patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
+             patch('pricepilot.core.database.get_property', return_value={'id': 11, 'account_id': 11, 'name': 'Luma Pisa'}), \
+             patch('pricepilot.core.database.get_telegram_link_by_property', return_value={'chat_id': 44}), \
+             patch('pricepilot.core.database.get_notification_preferences', return_value={'telegram_enabled': 1, 'approval_alerts': 1}), \
+             patch.object(telegram_bot, 'send_approval_request', return_value={'ok': True, 'result': {'message_id': 9001}}) as send, \
+             patch('pricepilot.core.database.record_notification_log'):
+            result = telegram_bot.send_existing_pending_approval(52, 11)
+        self.assertEqual(result, {'ok': True, 'message_id': '9001', 'log_id': 52})
+        send.assert_called_once()
+
+    def test_existing_pending_approval_with_message_id_is_not_resent(self):
+        from pricepilot.services import telegram_bot
+        row = {'id': 52, 'account_id': 11, 'property_id': 11,
+               'decision': 'PENDING_APPROVAL: 89.00->93.45 (+5.0%)',
+               'applied': 0, 'data_source': 'beds24_observation', 'tg_message_id': 9001}
+        with patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
+             patch.object(telegram_bot, 'send_approval_request') as send:
+            result = telegram_bot.send_existing_pending_approval(52, 11)
+        self.assertEqual(result, {'ok': True, 'already_sent': True, 'message_id': '9001'})
+        send.assert_not_called()
+
+    def test_approval_send_requires_telegram_message_id(self):
+        from pricepilot.services import telegram_bot
+        with patch.object(telegram_bot, '_api_call', return_value={'ok': True, 'result': {}}), \
+             patch('pricepilot.core.database.update_decision_tg_message') as update:
+            result = telegram_bot.send_approval_request(52, 'Luma Pisa', 89, 93.45, .2, None, '', 44,
+                                                        'calendar rule', '2026-10-04')
+        self.assertTrue(result['ok'])
+        update.assert_not_called()
+
     def test_sandbox_approval_has_distinct_callbacks_and_no_operational_writer(self):
         from pricepilot.services import telegram_bot
         with patch.object(telegram_bot, '_api_call', return_value={'ok': True}) as send:

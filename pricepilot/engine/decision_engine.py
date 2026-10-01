@@ -718,27 +718,29 @@ def _telegram_send_approval(
             reason     = reason,
             target_date = target_date.isoformat() if target_date else "",
         )
-        if result.get("ok"):
-            logger.info(f"[APPROVAL] Telegram inviato a chat_id={link['chat_id']}")
+        message_id = (result.get("result") or {}).get("message_id") if result.get("ok") else None
+        if result.get("ok") and message_id:
+            logger.info(f"[APPROVAL] Telegram inviato a chat_id={link['chat_id']} message_id={message_id}")
             record_notification_log(
                 event_type="approval_request",
                 status="sent",
                 account_id=int(prop.get("account_id") or 1),
                 property_id=prop_id,
                 recipient=str(link["chat_id"]),
-                message_id=str((result.get("result") or {}).get("message_id", "")),
+                message_id=str(message_id),
                 payload={"log_id": log_id, "new_price": new_price},
             )
             return True
         else:
-            logger.warning(f"[APPROVAL] Telegram fallito: {result.get('error')}")
+            error = result.get("error") or "Telegram non ha restituito message_id"
+            logger.warning(f"[APPROVAL] Telegram fallito: {error}")
             record_notification_log(
                 event_type="approval_request",
                 status="failed",
                 account_id=int(prop.get("account_id") or 1),
                 property_id=prop_id,
                 recipient=str(link["chat_id"]),
-                error=str(result.get("error", "")),
+                error=str(error),
                 payload={"log_id": log_id, "new_price": new_price},
             )
             return False
