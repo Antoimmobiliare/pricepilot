@@ -6970,7 +6970,9 @@ def tab_telegram():
                     st.toast("Rifiutato.", icon="❌")
                     st.rerun()
             with cd:
-                if not p.get("tg_message_id"):
+                if p.get("tg_message_id"):
+                    st.caption(f"✅ Telegram inviato · message_id {p['tg_message_id']}")
+                else:
                     if st.button("📤", key=f"resend_tg_{p['id']}",
                                  help="Invia la proposta pendente su Telegram", width="stretch"):
                         try:
@@ -6983,7 +6985,6 @@ def tab_telegram():
                                 raise ValueError(delivery.get("error", "invio non confermato"))
                             st.success(f"Telegram confermato (message_id {delivery['message_id']}).")
                             st.cache_data.clear()
-                            st.rerun()
                         except Exception as exc:
                             st.error(f"Invio Telegram non confermato: {exc}")
             st.divider()
