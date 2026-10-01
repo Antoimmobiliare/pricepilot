@@ -6915,6 +6915,7 @@ def tab_telegram():
                 st.markdown(
                     f"<div style='font-size:0.95rem'>"
                     f"<b>{pname}</b> &nbsp;·&nbsp; "
+                    f"📅 {p.get('date') or '-'} &nbsp;·&nbsp; "
                     f"€{p['old_price']:.2f} → "
                     f"<span style='color:{pct_col_t};font-weight:700'>€{p['new_price']:.2f}</span> "
                     f"({arrow} {abs(pct):.1f}%) &nbsp;·&nbsp; "
