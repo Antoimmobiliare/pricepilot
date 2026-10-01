@@ -386,8 +386,8 @@ def render_integrations(account_id, property_id=None):
                 st.json({'precheck': check, 'decision': decision})
         except Beds24Error as exc:
             st.error(f'Pre-check bounded non riuscito: {exc}. Nessuna proposta e nessuna scrittura avviata.')
-        except Exception:
-            st.error('Pre-check/pricing non riuscito: errore interno PricePilot. Nessuna scrittura avviata.')
+        except Exception as exc:
+            st.error(f'Pre-check/pricing non riuscito ({type(exc).__name__}). Nessuna scrittura avviata.')
         finally:
             client.close()
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')
