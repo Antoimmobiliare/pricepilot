@@ -10,12 +10,12 @@ from pricepilot.core.data_quality import DataUnavailable
 
 
 @contextmanager
-def pricing_date_lease(account_id: int, property_id: int, date_str: str, ttl_seconds: int = 300):
+def pricing_date_lease(account_id: int, property_id: int, date_str: str, ttl_seconds: int = 300, deadline=None):
     if min(account_id, property_id) < 1 or not 30 <= ttl_seconds <= 1800:
         raise ValueError("Lease pricing non valida.")
     token = secrets.token_urlsafe(24)
     expires = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
-    acquired = _acquire(account_id, property_id, date_str, token, expires)
+    acquired = _acquire(account_id, property_id, date_str, token, expires, deadline=deadline)
     if not acquired:
         raise DataUnavailable("Analisi della stessa data già in corso; attendere il ciclo attivo.")
     try:
@@ -24,7 +24,10 @@ def pricing_date_lease(account_id: int, property_id: int, date_str: str, ttl_sec
         _release(account_id, property_id, date_str, token)
 
 
-def _acquire(account_id, property_id, date_str, token, expires):
+def _acquire(account_id, property_id, date_str, token, expires, deadline=None):
+    import time
+    if deadline is not None and time.monotonic() >= deadline:
+        raise CloudDatabaseUnavailable("Lock cloud non disponibile entro il limite del ciclo.")
     if is_supabase_primary():
         try:
             # The lock RPC is deliberately executable only by service_role.

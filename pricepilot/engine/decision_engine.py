@@ -574,6 +574,7 @@ def _process_decision(
 def process_decision(*args, **kwargs):
     """Serialize proposal creation per tenant/property/date across workers."""
     from pricepilot.core.operation_lock import pricing_date_lease
+    cycle_deadline = kwargs.pop("_cycle_deadline", None)
     bound = inspect.signature(_process_decision).bind(*args, **kwargs)
     bound.apply_defaults()
     values = bound.arguments
@@ -582,7 +583,7 @@ def process_decision(*args, **kwargs):
     prop = _scoped_property(values['property_id'], values['account_id'])
     if not prop:
         raise ValueError('Proprieta non disponibile per questo account.')
-    with pricing_date_lease(int(prop.get('account_id') or 1), int(prop['id']), (values['target_date'] or pricing_today()).isoformat()):
+    with pricing_date_lease(int(prop.get('account_id') or 1), int(prop['id']), (values['target_date'] or pricing_today()).isoformat(), deadline=cycle_deadline):
         return _process_decision(*args, **kwargs)
 
 
