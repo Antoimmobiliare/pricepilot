@@ -4,7 +4,7 @@ No network activity at import. Credentials are referenced per connection.
 Writes only change the selected price slot, NEVER availability or restrictions.
 Beds24 read-back confirms its calendar, not downstream OTA propagation.
 """
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import os
@@ -239,6 +239,61 @@ class Beds24Client:
         if len(hits) != 1:
             raise Beds24Error("Tariffa/calendario Beds24 assente o ambiguo.")
         return hits[0]
+
+    def bounded_precheck(self, mapping, day, deadline=None):
+        """Read-only, single-night certification used before a live write.
+
+        The result is deliberately explicit: missing or non-interpretable
+        fields are returned as ``None`` and ``certified`` stays false.  No
+        availability or booking state is inferred from an absent value.
+        """
+        if not isinstance(day, date):
+            raise Beds24Error("Data Beds24 non valida.")
+        observed_at = datetime.now(timezone.utc).isoformat()
+        calendar_rows = self.calendar(mapping, day, day, deadline=deadline)
+        hits = []
+        for room in calendar_rows:
+            for row in room.get("calendar", []):
+                try:
+                    first = date.fromisoformat(row["from"])
+                    last = date.fromisoformat(row.get("to") or row["from"])
+                except (KeyError, TypeError, ValueError):
+                    raise Beds24Error("Data calendario Beds24 non valida.") from None
+                if first <= day <= last:
+                    hits.append(row)
+        if len(hits) != 1:
+            raise Beds24Error("Tariffa/calendario Beds24 assente o ambiguo.")
+        bookings = self.bookings(mapping, day, day + timedelta(days=1), deadline=deadline)
+        overlapping = []
+        for booking in bookings:
+            try:
+                arrival = date.fromisoformat(booking["arrival"])
+                departure = date.fromisoformat(booking["departure"])
+            except (KeyError, TypeError, ValueError):
+                raise Beds24Error("Date prenotazione non valide.") from None
+            if booking.get("status") not in {"cancelled", "inquiry"} and arrival <= day < departure:
+                overlapping.append({"id": booking.get("id"), "status": booking.get("status")})
+        row = hits[0]
+        slot = f"price{mapping['price_slot']}"
+        result = {
+            "date": day.isoformat(), "property_id": mapping["beds24_property_id"],
+            "room_id": mapping["room_id"], "price_slot": mapping["price_slot"],
+            "price": row.get(slot), "numAvail": row.get("numAvail"),
+            "minStay": row.get("minStay"), "override": row.get("override"),
+            "booking_overlap": bool(overlapping), "bookings": overlapping,
+            "observed_at": observed_at,
+        }
+        try:
+            expected_price = Decimal(str(result["price"])) == Decimal("89.00")
+        except (ValueError, TypeError):
+            expected_price = False
+        result["certified"] = (
+            result["price"] is not None and expected_price
+            and type(result["numAvail"]) is int
+            and type(result["minStay"]) is int and result["override"] == "none"
+            and result["numAvail"] == 1 and not result["booking_overlap"]
+        )
+        return result
 
     def set_price(self, mapping, day, price):
         value = Decimal(str(price))

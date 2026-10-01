@@ -161,6 +161,38 @@ class Beds24Tests(unittest.TestCase):
         self.assertEqual([r.method for r in self.calls],['GET','POST','GET'])
         self.assertFalse(result['downstream_ota_verified'])
 
+    def test_bounded_precheck_certifies_calendar_and_no_booking(self):
+        self.current = 89
+        def handle(req):
+            self.assertEqual(req.method, 'GET')
+            if req.url.path.endswith('/inventory/rooms/calendar'):
+                return httpx.Response(200, json=self.response(minStay=1))
+            self.assertTrue(req.url.path.endswith('/bookings'))
+            return httpx.Response(200, json={'success': True, 'data': [],
+                                             'pages': {'nextPageExists': False}})
+        result = self.client(handle).bounded_precheck(self.mapping, DAY)
+        self.assertTrue(result['certified'])
+        self.assertEqual(result['price'], 89)
+        self.assertEqual(result['numAvail'], 1)
+        self.assertEqual(result['minStay'], 1)
+        self.assertEqual(result['override'], 'none')
+        self.assertFalse(result['booking_overlap'])
+        self.assertEqual(result['price_slot'], 1)
+
+    def test_bounded_precheck_fails_closed_for_missing_or_booked_data(self):
+        def handle(req):
+            if req.url.path.endswith('/inventory/rooms/calendar'):
+                return httpx.Response(200, json=self.response(minStay=None))
+            return httpx.Response(200, json={'success': True, 'data': [{
+                'id': 7, 'propertyId': 10, 'roomId': 20, 'roomQty': 1,
+                'status': 'confirmed', 'arrival': DAY.isoformat(),
+                'departure': (DAY + timedelta(days=1)).isoformat()}],
+                'pages': {'nextPageExists': False}})
+        result = self.client(handle).bounded_precheck(self.mapping, DAY)
+        self.assertFalse(result['certified'])
+        self.assertTrue(result['booking_overlap'])
+        self.assertIsNone(result['minStay'])
+
     def test_blocked_day_never_writes(self):
         def handle(req):
             self.assertEqual(req.method,'GET')

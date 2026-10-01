@@ -360,4 +360,34 @@ def render_integrations(account_id, property_id=None):
             st.error(f'Acquisizione read-only non riuscita: {exc}. Nessun dato precedente è considerato aggiornato.')
         except Exception:
             st.error('Acquisizione read-only non riuscita: errore interno PricePilot. Nessun dato precedente è considerato aggiornato.')
+    if st.button('Collaudo bounded 04/10/2026 (solo GET)',
+                 disabled=not (mapping.get('enabled') and credentials),
+                 help='Certifica direttamente da Beds24 i campi necessari prima del workflow live.'):
+        from pricepilot.integrations.beds24 import Beds24Client, Beds24Error
+        from pricepilot.engine.decision_engine import process_decision
+        target_day = date(2026, 10, 4)
+        client = Beds24Client(token=os.getenv(mapping.get('token_env', ''), ''),
+                              refresh_token=os.getenv(mapping.get('refresh_token_env', ''), ''))
+        try:
+            with st.spinner('Pre-check Beds24 bounded in sola lettura…'):
+                check = client.bounded_precheck(mapping, target_day)
+            st.json(check)
+            if not check.get('certified'):
+                st.error('Pre-check non certificato: nessuna proposta e nessuna scrittura avviata.')
+            else:
+                with st.spinner('Esecuzione del normale pricing engine…'):
+                    decision = process_decision(property_id=int(prop['id']),
+                                                target_date=target_day,
+                                                account_id=int(account_id),
+                                                force_mode='approval',
+                                                data_source='beds24_observation',
+                                                occupancy_source='beds24_observation')
+                st.success(f"Proposta live creata: €{decision['old_price']:.2f} → €{decision['recommended_price']:.2f}. In attesa di approvazione Telegram.")
+                st.json({'precheck': check, 'decision': decision})
+        except Beds24Error as exc:
+            st.error(f'Pre-check bounded non riuscito: {exc}. Nessuna proposta e nessuna scrittura avviata.')
+        except Exception:
+            st.error('Pre-check/pricing non riuscito: errore interno PricePilot. Nessuna scrittura avviata.')
+        finally:
+            client.close()
     st.caption('Il successo della lettura non certifica l’invio prezzi né la propagazione sulle OTA. Questi passaggi saranno collaudati con gli annunci reali.')
