@@ -245,6 +245,7 @@ def run_pricing_cycle(
                         occupancy_source=occupancy.source,
                         defer_notifications=True,
                         account_id=account_id,
+                        _cycle_deadline=cycle_deadline,
                     )
                     results.append(result)
                     property_results.append({
