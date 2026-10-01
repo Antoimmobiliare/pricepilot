@@ -193,6 +193,16 @@ class Beds24Tests(unittest.TestCase):
         self.assertTrue(result['booking_overlap'])
         self.assertIsNone(result['minStay'])
 
+    def test_bounded_precheck_rejects_unstructured_provider_records(self):
+        def handle(req):
+            if req.url.path.endswith('/inventory/rooms/calendar'):
+                return httpx.Response(200, json={'success': True, 'data': [None],
+                                                 'pages': {'nextPageExists': False}})
+            return httpx.Response(200, json={'success': True, 'data': [],
+                                             'pages': {'nextPageExists': False}})
+        with self.assertRaisesRegex(Beds24Error, 'non compatibile'):
+            self.client(handle).bounded_precheck(self.mapping, DAY)
+
     def test_blocked_day_never_writes(self):
         def handle(req):
             self.assertEqual(req.method,'GET')

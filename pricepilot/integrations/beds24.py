@@ -144,6 +144,8 @@ class Beds24Client:
             "includePrices": "true", "includeNumAvail": "true", "includeOverride": "true", "includeMinStay": "true"}, deadline=deadline)
         # Beds24 V2 calendar records carry roomId but do not include propertyId.
         # Property scope is enforced by the request itself; retain the room guard.
+        if any(not isinstance(row, dict) for row in rows):
+            raise Beds24Error("Risposta calendario Beds24 non compatibile: record non strutturato.")
         if any(r.get("roomId") != mapping["room_id"] for r in rows):
             raise Beds24Error("Beds24 ha restituito un immobile diverso dal mapping.")
         return rows
@@ -223,6 +225,8 @@ class Beds24Client:
     def bookings(self, mapping, start, end, deadline=None):
         rows = self._pages("/bookings", {"propertyId": mapping["beds24_property_id"],
             "roomId": mapping["room_id"], "arrivalTo": end.isoformat(), "departureFrom": start.isoformat()}, deadline=deadline)
+        if any(not isinstance(row, dict) for row in rows):
+            raise Beds24Error("Risposta prenotazioni Beds24 non compatibile: record non strutturato.")
         if any(r.get("roomId") != mapping["room_id"] or r.get("propertyId") != mapping["beds24_property_id"] for r in rows):
             raise Beds24Error("Prenotazioni Beds24 fuori dal mapping richiesto.")
         # Return only operational fields: no guest contacts, payment details or messages.
@@ -253,7 +257,13 @@ class Beds24Client:
         calendar_rows = self.calendar(mapping, day, day, deadline=deadline)
         hits = []
         for room in calendar_rows:
+            if not isinstance(room, dict):
+                raise Beds24Error("Risposta calendario Beds24 non compatibile: stanza non strutturata.")
+            if not isinstance(room.get("calendar"), list):
+                raise Beds24Error("Risposta calendario Beds24 non compatibile: calendario assente.")
             for row in room.get("calendar", []):
+                if not isinstance(row, dict):
+                    raise Beds24Error("Risposta calendario Beds24 non compatibile: giorno non strutturato.")
                 try:
                     first = date.fromisoformat(row["from"])
                     last = date.fromisoformat(row.get("to") or row["from"])
