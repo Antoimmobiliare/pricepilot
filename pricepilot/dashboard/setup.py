@@ -375,13 +375,20 @@ def render_integrations(account_id, property_id=None):
             if not check.get('certified'):
                 st.error('Pre-check non certificato: nessuna proposta e nessuna scrittura avviata.')
             else:
-                with st.spinner('Esecuzione del normale pricing engine…'):
-                    decision = process_decision(property_id=int(prop['id']),
-                                                target_date=target_day,
-                                                account_id=int(account_id),
-                                                force_mode='approval',
-                                                data_source='beds24_observation',
-                                                occupancy_source='beds24_observation')
+                try:
+                    with st.spinner('Esecuzione del normale pricing engine…'):
+                        decision = process_decision(property_id=int(prop['id']),
+                                                    target_date=target_day,
+                                                    account_id=int(account_id),
+                                                    force_mode='approval',
+                                                    data_source='beds24_observation',
+                                                    occupancy_source='beds24_observation')
+                except Exception as exc:
+                    st.error(f'Pricing engine non riuscito ({type(exc).__name__}). Nessuna proposta inviata e nessuna scrittura avviata.')
+                    decision = None
+                if decision is None:
+                    client.close()
+                    return
                 st.success(f"Proposta live creata: €{decision['old_price']:.2f} → €{decision['recommended_price']:.2f}. In attesa di approvazione Telegram.")
                 st.json({'precheck': check, 'decision': decision})
         except Beds24Error as exc:
