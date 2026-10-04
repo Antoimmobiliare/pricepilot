@@ -36,9 +36,32 @@ from typing import Optional, Dict, Any
 logger = logging.getLogger("pricepilot.telegram_bot")
 # Bump this module marker when the Telegram delivery path changes so hosted
 # Streamlit runtimes invalidate any previously loaded module copy.
-TELEGRAM_DELIVERY_MODULE_VERSION = "2026-10-01-pending-delivery"
+TELEGRAM_DELIVERY_MODULE_VERSION = "2026-10-05-decision-ux"
 
 WEBHOOK_SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
+
+_SIGNAL_LABELS = {
+    "occupancy_weak": "Occupancy debole",
+    "occupancy_strong": "Occupancy forte",
+    "pickup_weak": "Pickup debole",
+    "pickup_strong": "Pickup forte",
+    "confirmed_isolated_gap": "Gap isolato confermato",
+}
+
+_URGENCY_ACTION_LABELS = {
+    "amplify_negative_signals": "Pressione alla vendita applicata entro i guardrail.",
+    "hold_insufficient_negative_evidence": "Evidenza insufficiente: nessuna pressione last-minute aggiuntiva.",
+    "hold_positive_signals": "Segnali positivi: nessuna pressione alla vendita aggiuntiva.",
+    "hold_signal_conflict": "Segnali contrastanti: evitata ulteriore pressione last-minute.",
+    "standard_rules_only": "Fascia standard: applicate soltanto le regole base.",
+    "hold_no_negative_signals": "Nessun segnale negativo affidabile: prezzo protetto.",
+    "disabled_legacy": "Applicate le regole base configurate.",
+}
+
+_ITALIAN_MONTHS = (
+    "", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+    "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre",
+)
 
 
 # ─── Helpers per le variabili d'ambiente ─────────────────────────────────────
@@ -190,6 +213,169 @@ def send_message(chat_id: int, text: str, parse_mode: str = "Markdown") -> Dict:
     })
 
 
+def _format_eur(value: float, *, signed: bool = False) -> str:
+    amount = float(value)
+    sign = "+" if signed and amount > 0 else ("-" if signed and amount < 0 else "")
+    rendered = f"{abs(amount):.2f}".replace(".", ",")
+    return f"{sign}€{rendered}"
+
+
+def _format_target_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return str(value or "Data non disponibile")
+    return f"{parsed.day} {_ITALIAN_MONTHS[parsed.month]} {parsed.year}"
+
+
+def _format_lead_time(hours: Any) -> Optional[str]:
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours < 0:
+        return None
+    total_minutes = int(round(float(hours) * 60))
+    return f"{total_minutes // 60}h {total_minutes % 60:02d}m"
+
+
+def _unsold_risk_label(value: Any) -> Optional[str]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    pressure = float(value)
+    if pressure == 0:
+        return "nessuno"
+    if pressure <= .15:
+        return "basso"
+    if pressure <= .35:
+        return "moderato"
+    return "elevato"
+
+
+def _signal_names(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    names = []
+    for item in items:
+        signal_id = item.get("signal") if isinstance(item, dict) else item
+        if signal_id in _SIGNAL_LABELS and _SIGNAL_LABELS[signal_id] not in names:
+            names.append(_SIGNAL_LABELS[signal_id])
+    return names
+
+
+def _decision_factors(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _display_reason(value: Any) -> str:
+    """Remove storage metadata while preserving the engine's original reason."""
+    notes = str(value or "").strip()
+    if not notes.startswith("plan=") or " | guardrails=" not in notes:
+        return notes
+    guardrail_start = notes.find(" | guardrails=")
+    reason_start = notes.find(" | ", guardrail_start + len(" | guardrails="))
+    return notes[reason_start + 3:].strip() if reason_start >= 0 else notes
+
+
+def _build_approval_payload(
+    *, log_id: int, prop_name: str, old_price: float, new_price: float,
+    occupancy: Optional[float], market_avg: Optional[float], event: str,
+    reason: str, target_date: str, decision_factors: Optional[Dict[str, Any]] = None,
+    next_log_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Render a decision already made by the engine; never derive a new price."""
+    factors = _decision_factors(decision_factors)
+    delta = float(new_price) - float(old_price)
+    pct = delta / max(float(old_price), 1) * 100
+    unchanged = abs(delta) < .005
+    if unchanged:
+        price_line = f"💶 *{_format_eur(old_price)} — MANTIENI*"
+    else:
+        price_line = f"💶 *{_format_eur(old_price)} → {_format_eur(new_price)}*"
+
+    lines = [
+        f"🏠 *{prop_name or 'Proprietà'}*",
+        f"📅 {_format_target_date(target_date)}",
+        "",
+    ]
+    human_time = _format_lead_time(factors.get("hours_until_checkin"))
+    band = str(factors.get("lead_time_band") or factors.get("urgency_band") or "").strip()
+    band_label = band.replace("_", " ")
+    if human_time or band_label:
+        lead_parts = ([f"Check-in tra {human_time}"] if human_time else []) + ([band_label] if band_label else [])
+        lines.extend([f"⏱ {' · '.join(lead_parts)}", ""])
+    pct_text = "0,0%" if unchanged else f"{pct:+.1f}%".replace(".", ",")
+    lines.extend([
+        price_line,
+        f"Variazione: {_format_eur(delta, signed=True)} / {pct_text}",
+    ])
+
+    signal_lines = []
+    if isinstance(occupancy, (int, float)) and not isinstance(occupancy, bool):
+        signal_lines.append(f"Occupancy: {float(occupancy) * 100:.0f}%")
+    pickup = factors.get("pickup_7d_nights")
+    if isinstance(pickup, int) and not isinstance(pickup, bool):
+        signal_lines.append(f"Pickup 7gg: {pickup} {'notte' if pickup == 1 else 'notti'}")
+    negative = _signal_names(factors.get("negative_signals"))
+    positive = _signal_names(factors.get("positive_signals"))
+    if "Gap isolato confermato" in negative:
+        gap_nights = factors.get("gap_nights")
+        gap_suffix = f" ({gap_nights} {'notte' if gap_nights == 1 else 'notti'})" if isinstance(gap_nights, int) else ""
+        signal_lines.append(f"Gap isolato: confermato{gap_suffix}")
+    risk_label = _unsold_risk_label(factors.get("unsold_risk_pressure"))
+    if risk_label:
+        signal_lines.append(f"Rischio invenduto: {risk_label}")
+    confidence = {"limited": "limitata", "supported": "supportata", "conflicted": "contrastante"}.get(
+        str(factors.get("rules_confidence") or "")
+    )
+    if confidence:
+        signal_lines.append(f"Evidenza: {confidence}")
+    if negative:
+        signal_lines.append(f"Segnali negativi: {', '.join(negative)}")
+    if positive:
+        signal_lines.append(f"Segnali positivi: {', '.join(positive)}")
+    if signal_lines:
+        lines.extend(["", "📊 *Segnali*", *signal_lines])
+
+    if factors.get("signal_conflict") is True:
+        lines.extend(["", "⚠️ *Segnali contrastanti*"])
+        if positive:
+            lines.append(f"Positivi: {', '.join(positive)}")
+        if negative:
+            lines.append(f"Negativi: {', '.join(negative)}")
+        lines.append("PricePilot ha evitato ulteriore pressione last-minute.")
+
+    action = _URGENCY_ACTION_LABELS.get(str(factors.get("urgency_action") or ""))
+    explanation = str(reason or "").strip()
+    if action or explanation:
+        lines.extend(["", "💡 *PricePilot*"])
+        if action:
+            lines.append(action)
+        if explanation:
+            lines.append(explanation)
+    elif unchanged:
+        lines.extend(["", "💡 *PricePilot*", "I segnali disponibili non giustificano una variazione."])
+
+    if isinstance(market_avg, (int, float)) and not isinstance(market_avg, bool) and market_avg > 0:
+        lines.extend(["", f"Mercato osservato nella decisione: {_format_eur(market_avg)}"])
+    if event and event not in ("none", "", "0"):
+        lines.append(f"Evento registrato: {event}")
+
+    keyboard = {"inline_keyboard": [[
+        {"text": f"✅ Approva {_format_eur(new_price)}", "callback_data": f"approve_{log_id}"},
+        {"text": "❌ Rifiuta", "callback_data": f"reject_{log_id}"},
+    ]]}
+    if next_log_id:
+        keyboard["inline_keyboard"].append([
+            {"text": "Prossima data da valutare", "callback_data": f"review_{next_log_id}"}
+        ])
+    return {"text": "\n".join(lines), "reply_markup": keyboard}
+
+
 def send_approval_request(
     log_id:     int,
     prop_name:  str,
@@ -202,6 +388,7 @@ def send_approval_request(
     reason:     str = "",
     target_date: str = "",
     next_log_id: Optional[int] = None,
+    decision_factors: Optional[Dict[str, Any]] = None,
 ) -> Dict:
     """
     Invia il messaggio di richiesta approvazione con i pulsanti inline
@@ -209,41 +396,18 @@ def send_approval_request(
 
     Returns il risultato dell'API (contiene 'result.message_id' se ok).
     """
-    pct   = (new_price - old_price) / max(old_price, 1) * 100
-    arrow = "🔼" if pct > 0 else ("🔽" if pct < 0 else "➡️")
-    event_line  = f"\n🎉 *Evento:* `{event}`" if event and event not in ("none", "", "0") else ""
-    reason_line = f"\n\n📋 *Motivo:*\n{reason}" if reason else ""
-
-    text = (
-        f"✈️ *PricePilot – Approvazione Richiesta*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏠 *Proprietà:* {prop_name}\n"
-        f"📅 *Notte:* {target_date or 'vedi motivo'}\n"
-        f"💰 *Prezzo attuale:* €{old_price:.2f}\n"
-        f"🎯 *Prezzo consigliato:* €{new_price:.2f} {arrow} `{pct:+.1f}%`\n"
-        + (f"📊 *Media mercato:* €{market_avg:.2f}\n" if market_avg is not None else "📋 Analisi calendario proprio; competitor da verificare manualmente.\n")
-        +
-        f"📈 *Occupancy:* {occupancy * 100:.0f}%"
-        f"{event_line}"
-        f"{reason_line}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Vuoi applicare il nuovo prezzo al listing?"
+    rendered = _build_approval_payload(
+        log_id=log_id, prop_name=prop_name, old_price=old_price, new_price=new_price,
+        occupancy=occupancy, market_avg=market_avg, event=event, reason=reason,
+        target_date=target_date, decision_factors=decision_factors,
+        next_log_id=next_log_id,
     )
-
-    keyboard = {
-        "inline_keyboard": [[
-            {"text": "✅ Approva",  "callback_data": f"approve_{log_id}"},
-            {"text": "❌ Rifiuta",  "callback_data": f"reject_{log_id}"},
-        ]]
-    }
-    if next_log_id:
-        keyboard['inline_keyboard'].append([{'text': 'Prossima data da valutare', 'callback_data': f'review_{next_log_id}'}])
 
     result = _api_call("sendMessage", {
         "chat_id":      chat_id,
-        "text":         text,
+        "text":         rendered["text"],
         "parse_mode":   "Markdown",
-        "reply_markup": keyboard,
+        "reply_markup": rendered["reply_markup"],
     })
 
     # Salva il message_id nel decision_log per l'edit successivo
@@ -294,9 +458,11 @@ def send_existing_pending_approval(log_id: int, account_id: int) -> Dict:
     result = send_approval_request(
         log_id=int(log_id), prop_name=prop.get("name", "Proprieta"),
         old_price=float(row.get("old_price") or 0), new_price=float(row.get("new_price") or 0),
-        occupancy=float(row.get("occupancy") or 0), market_avg=row.get("market_avg"),
-        event="", chat_id=link["chat_id"], reason=str(row.get("notes") or ""),
+        occupancy=(float(row["occupancy"]) if row.get("occupancy") is not None else None),
+        market_avg=row.get("market_avg"), event="", chat_id=link["chat_id"],
+        reason=_display_reason(row.get("notes")),
         target_date=str(row.get("date") or ""),
+        decision_factors=_decision_factors(row.get("factors")),
     )
     message_id = (result.get("result") or {}).get("message_id") if result.get("ok") else None
     if not result.get("ok") or not message_id:
@@ -497,9 +663,10 @@ def _review_pending(log_id, chat_id):
     remaining.sort(key=lambda c: c['date'])
     from pricepilot.engine.decision_engine import _scoped_property
     prop = _scoped_property(context['property_id'], context['account_id']) or {}
-    send_approval_request(log_id, prop.get('name', ''), row['old_price'], row['new_price'], row['occupancy'],
-                          row.get('market_avg'), '', chat_id, row.get('notes', ''), row['date'],
-                          remaining[0]['id'] if remaining else None)
+    send_approval_request(log_id, prop.get('name', ''), row['old_price'], row['new_price'], row.get('occupancy'),
+                          row.get('market_avg'), '', chat_id, _display_reason(row.get('notes')), row['date'],
+                          remaining[0]['id'] if remaining else None,
+                          _decision_factors(row.get('factors')))
     return True
 
 

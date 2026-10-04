@@ -621,7 +621,7 @@ class CalendarWorkflowTests(unittest.TestCase):
             telegram_bot.send_approval_request(1, 'Fixture', 100, 90, .2, None, '', 123, 'Test rule')
         body = send.call_args.args[1]
         self.assertNotIn('Media mercato', body['text'])
-        self.assertIn('competitor da verificare manualmente', body['text'])
+        self.assertNotIn('competitor', body['text'].lower())
         self.assertEqual(len(body['reply_markup']['inline_keyboard'][0]), 2)
 
     def test_readiness_does_not_require_external_market_source(self):
@@ -640,7 +640,9 @@ class TelegramCalendarWorkflowTests(unittest.TestCase):
                'decision': 'PENDING_APPROVAL: 89.00->93.45 (+5.0%)',
                'applied': 0, 'data_source': 'beds24_observation',
                'old_price': 89.0, 'new_price': 93.45, 'occupancy': .2,
-               'market_avg': None, 'date': '2026-10-04', 'notes': 'calendar rule'}
+               'market_avg': None, 'date': '2026-10-04', 'notes': 'calendar rule',
+               'factors': json.dumps({'lead_time_band': 'URGENT',
+                                      'hours_until_checkin': 19.5})}
         with patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
              patch('pricepilot.core.database.get_property', return_value={'id': 11, 'account_id': 11, 'name': 'Luma Pisa'}), \
              patch('pricepilot.core.database.get_telegram_link_by_property', return_value={'chat_id': 44}), \
@@ -650,6 +652,8 @@ class TelegramCalendarWorkflowTests(unittest.TestCase):
             result = telegram_bot.send_existing_pending_approval(52, 11)
         self.assertEqual(result, {'ok': True, 'message_id': '9001', 'log_id': 52})
         send.assert_called_once()
+        self.assertEqual(send.call_args.kwargs['decision_factors'],
+                         {'lead_time_band': 'URGENT', 'hours_until_checkin': 19.5})
 
     def test_existing_pending_approval_with_message_id_is_not_resent(self):
         from pricepilot.services import telegram_bot

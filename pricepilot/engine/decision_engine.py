@@ -517,7 +517,10 @@ def _process_decision(
         if calendar_status == 'manual_review':
             _telegram_send_recommendation(prop, base_price, recommended, occupancy, stats['market_avg'], event, reason)
         elif mode == 'approval':
-            _telegram_send_approval(prop, base_price, recommended, occupancy, stats['market_avg'], event, log_id, reason, d)
+            _telegram_send_approval(
+                prop, base_price, recommended, occupancy, stats['market_avg'], event,
+                log_id, reason, d, pricing.get('breakdown') or {},
+            )
         elif mode == 'advisory':
             _telegram_send_recommendation(prop, base_price, recommended, occupancy, stats['market_avg'], event, reason)
     record_audit_event(
@@ -681,6 +684,7 @@ def _telegram_send_approval(
     prop: Dict, old_price: float, new_price: float,
     occupancy: float, market_avg: float, event: str,
     log_id: Optional[int], reason: str = "", target_date: Optional[date] = None,
+    decision_factors: Optional[Dict] = None,
 ) -> bool:
     """Tenta di inviare la richiesta di approvazione via Telegram con motivo."""
     try:
@@ -725,6 +729,7 @@ def _telegram_send_approval(
             chat_id    = link["chat_id"],
             reason     = reason,
             target_date = target_date.isoformat() if target_date else "",
+            decision_factors = decision_factors,
         )
         message_id = (result.get("result") or {}).get("message_id") if result.get("ok") else None
         if result.get("ok") and message_id:
