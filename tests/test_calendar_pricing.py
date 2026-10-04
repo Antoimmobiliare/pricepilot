@@ -29,6 +29,24 @@ def policy():
                  'low_multiplier': 1, 'high_multiplier': 1.05}]}
 
 
+def risk_policy():
+    own = policy()
+    own['pacing_rule'] = {'enabled': True, 'through_days': 60,
+        'low_pickup_7d_nights': 1, 'high_pickup_7d_nights': 5,
+        'low_multiplier': .95, 'high_multiplier': 1.08}
+    own['gap_rule'] = {'enabled': True, 'max_nights': 3, 'through_days': 21,
+                       'multiplier': .90}
+    own['unsold_risk'] = {
+        'enabled': True,
+        'urgency_weights': {'STANDARD': 0, 'WATCH': .15, 'LAST_MINUTE': .4,
+                            'URGENT': .7, 'SAME_DAY': 1},
+        'max_amplification': .5,
+        'max_total_discount': .15,
+        'minimum_negative_signals': 2,
+    }
+    return own
+
+
 class CalendarRuleTests(unittest.TestCase):
     def calculate(self, **changes):
         args = dict(current_price=100, occupancy=.2,
@@ -250,6 +268,117 @@ class CalendarRuleTests(unittest.TestCase):
         self.assertEqual(last_minute['recommended_price'], urgent['recommended_price'])
         self.assertEqual(last_minute['breakdown']['effective_multiplier'],
                          urgent['breakdown']['effective_multiplier'])
+
+    def risk_calculate(self, hours, *, occupancy=.2, context=None, current_price=100,
+                       own=None, min_price=50, break_even=None, max_change_pct=.2):
+        zone = ZoneInfo('Europe/Rome')
+        checkin = datetime(2026, 10, 10, 15, 0, tzinfo=zone)
+        configured = deepcopy(own or risk_policy())
+        if break_even is not None:
+            configured['break_even'] = break_even
+        return self.calculate(
+            current_price=current_price, occupancy=occupancy,
+            target_date=checkin.date(), now=checkin-timedelta(hours=hours),
+            policy=configured, inventory_context=context or {}, min_price=min_price,
+            max_change_pct=max_change_pct,
+        )
+
+    def test_standard_open_date_and_watch_healthy_do_not_discount_for_urgency(self):
+        standard = self.risk_calculate(73, occupancy=.6)
+        watch = self.risk_calculate(60, occupancy=.6, context={
+            'metrics_complete': True, 'pickup_7d_nights': 3})
+        self.assertEqual(standard['recommended_price'], 100)
+        self.assertEqual(watch['recommended_price'], 100)
+        self.assertEqual(standard['breakdown']['unsold_risk_pressure'], 0)
+        self.assertEqual(watch['breakdown']['urgency_action'], 'hold_no_negative_signals')
+
+    def test_negative_signals_are_progressively_amplified_by_urgency(self):
+        context = {'metrics_complete': True, 'pickup_7d_nights': 0}
+        results = [self.risk_calculate(hours, context=context)
+                   for hours in (60, 36, 17, 4)]
+        prices = [result['recommended_price'] for result in results]
+        pressures = [result['breakdown']['unsold_risk_pressure'] for result in results]
+        self.assertGreater(prices[0], prices[1])
+        self.assertGreater(prices[1], prices[2])
+        self.assertGreater(prices[2], prices[3])
+        self.assertEqual(pressures, sorted(pressures))
+        self.assertTrue(all(result['breakdown']['urgency_action'] == 'amplify_negative_signals'
+                            for result in results))
+
+    def test_last_minute_and_same_day_positive_signals_do_not_force_floor(self):
+        context = {'metrics_complete': True, 'pickup_7d_nights': 7}
+        last_minute = self.risk_calculate(36, occupancy=.9, context=context,
+                                          current_price=108)
+        same_day = self.risk_calculate(4, occupancy=.9, context=context,
+                                      current_price=108)
+        self.assertGreaterEqual(last_minute['recommended_price'], 100)
+        self.assertGreaterEqual(same_day['recommended_price'], 100)
+        self.assertEqual(same_day['breakdown']['urgency_action'], 'hold_positive_signals')
+
+    def test_urgent_positive_pickup_is_less_aggressive_and_reports_conflict(self):
+        weak = self.risk_calculate(17, context={
+            'metrics_complete': True, 'pickup_7d_nights': 0})
+        positive = self.risk_calculate(17, context={
+            'metrics_complete': True, 'pickup_7d_nights': 7})
+        self.assertGreater(positive['recommended_price'], weak['recommended_price'])
+        self.assertTrue(positive['breakdown']['signal_conflict'])
+        self.assertEqual(positive['breakdown']['rules_confidence'], 'conflicted')
+        self.assertEqual(positive['breakdown']['urgency_action'], 'hold_signal_conflict')
+        self.assertTrue(positive['breakdown']['negative_signals'])
+        self.assertTrue(positive['breakdown']['positive_signals'])
+
+    def test_confirmed_gap_strengthens_urgent_pressure_without_stacking(self):
+        pacing = {'metrics_complete': True, 'pickup_7d_nights': 0}
+        normal = self.risk_calculate(17, context=pacing)
+        gap = self.risk_calculate(17, context={**pacing, 'gap_nights': 1,
+            'gap_boundaries_confirmed': True, 'minimum_stay': 1})
+        self.assertLess(gap['recommended_price'], normal['recommended_price'])
+        self.assertGreaterEqual(gap['breakdown']['effective_multiplier'], .85)
+        self.assertGreater(gap['breakdown']['effective_multiplier'], .9*.95*.9)
+        self.assertEqual(gap['breakdown']['urgency_action'], 'amplify_negative_signals')
+
+    def test_consecutive_open_nights_are_not_invented_as_isolated_gap(self):
+        result = self.risk_calculate(12, occupancy=.6, context={
+            'metrics_complete': True, 'pickup_7d_nights': 0,
+            'consecutive_open_nights': 4})
+        self.assertEqual(result['breakdown']['gap_multiplier'], 1)
+        self.assertNotIn('confirmed_isolated_gap',
+                         [item['signal'] for item in result['breakdown']['negative_signals']])
+        self.assertEqual(result['recommended_price'], 100)
+
+    def test_reference_price_does_not_compound_unsold_risk(self):
+        context = {'metrics_complete': True, 'pickup_7d_nights': 0}
+        first = self.risk_calculate(12, context=context)
+        second = self.risk_calculate(12, context=context,
+                                     current_price=first['recommended_price'])
+        self.assertEqual(second['recommended_price'], first['recommended_price'])
+        self.assertEqual(second['breakdown']['reference_price'], 100)
+
+    def test_unsold_risk_respects_floor_break_even_and_max_change(self):
+        context = {'metrics_complete': True, 'pickup_7d_nights': 0,
+                   'gap_nights': 1, 'gap_boundaries_confirmed': True,
+                   'minimum_stay': 1}
+        floor = self.risk_calculate(4, context=context, min_price=92, break_even=94)
+        limited = self.risk_calculate(4, context=context, max_change_pct=.05)
+        self.assertGreaterEqual(floor['recommended_price'], 94)
+        self.assertGreaterEqual(limited['recommended_price'], 95)
+
+    def test_legacy_policy_preserves_previous_economics_and_reports_disabled(self):
+        legacy = policy()
+        zone = ZoneInfo('Europe/Rome')
+        checkin = datetime(2026, 10, 10, 15, 0, tzinfo=zone)
+        result = self.calculate(target_date=checkin.date(),
+            now=checkin-timedelta(hours=12), policy=legacy,
+            inventory_context={'metrics_complete': True, 'pickup_7d_nights': 0})
+        self.assertEqual(result['recommended_price'], 90)
+        self.assertEqual(result['breakdown']['urgency_action'], 'disabled_legacy')
+
+    def test_unsold_risk_configuration_is_bounded_and_ordered(self):
+        invalid = risk_policy()
+        invalid['unsold_risk']['urgency_weights']['WATCH'] = .9
+        invalid['unsold_risk']['urgency_weights']['LAST_MINUTE'] = .2
+        with self.assertRaisesRegex(ValueError, 'crescere progressivamente'):
+            self.calculate(policy=invalid)
 
     def test_urgency_band_change_invalidates_proposal_deduplication(self):
         prior = {'policy_fingerprint': 'x', 'current_price_source': 'beds24_observation',

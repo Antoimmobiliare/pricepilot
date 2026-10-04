@@ -29,6 +29,20 @@ WATCH_MAX_HOURS = 72
 LAST_MINUTE_MAX_HOURS = 48
 URGENT_MAX_HOURS = 24
 
+DEFAULT_UNSOLD_RISK = {
+    'enabled': False,
+    'urgency_weights': {
+        LEAD_TIME_STANDARD: 0.0,
+        LEAD_TIME_WATCH: 0.15,
+        LEAD_TIME_LAST_MINUTE: 0.40,
+        LEAD_TIME_URGENT: 0.70,
+        LEAD_TIME_SAME_DAY: 1.0,
+    },
+    'max_amplification': 0.50,
+    'max_total_discount': 0.15,
+    'minimum_negative_signals': 2,
+}
+
 
 def pricing_today(timezone_name=None):
     """Calendar day used for lead time, stable across local and cloud workers."""
@@ -136,6 +150,20 @@ def finite(value, low, high):
     return number
 
 
+def _unsold_risk_settings(policy):
+    configured = policy.get('unsold_risk')
+    if configured is None:
+        return dict(DEFAULT_UNSOLD_RISK)
+    if not isinstance(configured, dict):
+        raise ValueError('Configurazione rischio invenduto non valida.')
+    settings = {**DEFAULT_UNSOLD_RISK, **configured}
+    settings['urgency_weights'] = {
+        **DEFAULT_UNSOLD_RISK['urgency_weights'],
+        **(configured.get('urgency_weights') or {}),
+    }
+    return settings
+
+
 def validate_policy(policy):
     _policy_timezone(policy)
     _policy_checkin_time(policy)
@@ -143,6 +171,23 @@ def validate_policy(policy):
     finite(policy.get('weekend_multiplier', 1), .5, 2)
     finite(policy.get('break_even', 0), 0, 100000)
     finite(policy.get('minimum_change_eur', 1), .01, 1000)
+    risk = _unsold_risk_settings(policy)
+    if type(risk.get('enabled')) is not bool:
+        raise ValueError('Attivazione rischio invenduto non valida.')
+    weights = risk.get('urgency_weights')
+    if not isinstance(weights, dict):
+        raise ValueError('Pesi urgenza non validi.')
+    ordered_weights = []
+    for name in (LEAD_TIME_STANDARD, LEAD_TIME_WATCH, LEAD_TIME_LAST_MINUTE,
+                 LEAD_TIME_URGENT, LEAD_TIME_SAME_DAY):
+        ordered_weights.append(finite(weights.get(name), 0, 1))
+    if ordered_weights[0] != 0 or ordered_weights != sorted(ordered_weights):
+        raise ValueError('I pesi urgenza devono partire da zero e crescere progressivamente.')
+    finite(risk.get('max_amplification'), 0, 1)
+    finite(risk.get('max_total_discount'), 0, .30)
+    minimum_signals = risk.get('minimum_negative_signals')
+    if type(minimum_signals) is not int or not 2 <= minimum_signals <= 3:
+        raise ValueError('Numero minimo di segnali negativi non valido.')
     gap = policy.get('gap_rule', {})
     if gap:
         if type(gap.get('enabled', False)) is not bool:
@@ -307,18 +352,40 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
             'reason': f'Vuoto di {gap_nights} notti tra prenotazioni confermate non prenotabile con soggiorno minimo {context["minimum_stay"]}.',
         })
     signal_conflict = multiplier < 1 and pacing_multiplier > 1
+    risk = _unsold_risk_settings(policy)
+    risk_enabled = risk['enabled'] is True
+    negative_signals = []
+    positive_signals = []
+    if multiplier < 1:
+        negative_signals.append({'signal': 'occupancy_weak', 'multiplier': multiplier})
+    elif multiplier > 1:
+        positive_signals.append({'signal': 'occupancy_strong', 'multiplier': multiplier})
+    if pacing_multiplier < 1:
+        negative_signals.append({'signal': 'pickup_weak', 'multiplier': pacing_multiplier})
+    elif pacing_multiplier > 1:
+        positive_signals.append({'signal': 'pickup_strong', 'multiplier': pacing_multiplier})
+    confirmed_gap = bool(
+        gap_multiplier < 1 and context.get('gap_boundaries_confirmed') is True
+        and type(gap_nights) is int
+    )
+    if confirmed_gap:
+        negative_signals.append({'signal': 'confirmed_isolated_gap',
+                                 'multiplier': gap_multiplier, 'gap_nights': gap_nights})
+    if risk_enabled:
+        signal_conflict = bool(negative_signals and positive_signals)
     if signal_conflict:
         manual_actions.append({
             'type': 'pricing_signal_conflict',
             'occupancy': occupancy,
             'pickup_7d_nights': pickup,
             'reason': (
-                'Occupazione sotto la soglia ma pickup recente sopra la soglia: '
-                'mantenere il prezzo e verificare calendario e durata delle nuove prenotazioni.'
+                'Segnali propri positivi e negativi in conflitto: mantenere il prezzo '
+                'e verificare calendario, pickup e durata delle nuove prenotazioni.'
             ),
         })
-    # Upward evidence wins over a discount. Discounts never stack: the most
-    # conservative explicit reduction is applied once to the stable reference.
+    # Upward evidence wins over a discount. Discounts never stack: first find
+    # one base multiplier from explicit owner rules, then optionally strengthen
+    # that same reduction using coherent, observed evidence.
     upward = [m for m in (multiplier, pacing_multiplier) if m > 1]
     if signal_conflict:
         effective_multiplier = 1.0
@@ -330,6 +397,33 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
         effective_multiplier = min(multiplier, pacing_multiplier)
     else:
         effective_multiplier = 1.0
+    base_effective_multiplier = effective_multiplier
+    urgency_weight = float(risk['urgency_weights'][lead_time['lead_time_band']])
+    unsold_risk_pressure = 0.0
+    urgency_action = 'disabled_legacy'
+    if risk_enabled:
+        urgency_action = 'standard_rules_only' if urgency_weight == 0 else 'hold_no_negative_signals'
+        if negative_signals:
+            strongest_reduction = max(1-float(item['multiplier']) for item in negative_signals)
+            evidence_coherence = min(1.0, len(negative_signals) / 3.0)
+            max_total_discount = float(risk['max_total_discount'])
+            severity = min(1.0, strongest_reduction / max_total_discount) if max_total_discount else 0.0
+            unsold_risk_pressure = round(urgency_weight * evidence_coherence * severity, 4)
+            if signal_conflict:
+                urgency_action = 'hold_signal_conflict'
+            elif len(negative_signals) < risk['minimum_negative_signals']:
+                urgency_action = 'hold_insufficient_negative_evidence'
+            elif urgency_weight > 0 and strongest_reduction > 0:
+                extra_reduction = (strongest_reduction * float(risk['max_amplification'])
+                                   * urgency_weight * evidence_coherence)
+                total_reduction = min(max_total_discount, strongest_reduction + extra_reduction)
+                effective_multiplier = min(effective_multiplier, 1-total_reduction)
+                urgency_action = 'amplify_negative_signals'
+        if positive_signals and not negative_signals:
+            urgency_action = 'hold_positive_signals'
+    rules_confidence = ('conflicted' if signal_conflict else
+                        'supported' if len(negative_signals) >= risk['minimum_negative_signals'] else
+                        'limited')
     # Due segnali contrari non giustificano una variazione. Conserviamo il
     # prezzo pubblicato anche nel weekend e chiediamo una revisione umana.
     candidate = current_price if signal_conflict else reference * effective_multiplier * weekend_multiplier
@@ -338,14 +432,28 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
         old_price=current_price, new_price=candidate, min_price=min_price,
         max_price=max_price, max_change_pct=max_change_pct,
         break_even=float(policy.get('break_even', 0)), lead_time_limits=False)
+    if signal_conflict:
+        urgency_note = 'Segnali positivi e negativi in conflitto; prezzo invariato e revisione prudente'
+    elif urgency_action == 'amplify_negative_signals':
+        urgency_note = ('I segnali negativi coerenti aumentano il rischio di invenduto; '
+                        'pressione vendita applicata entro i guardrail')
+    elif urgency_action == 'hold_positive_signals':
+        urgency_note = 'I segnali positivi non giustificano pressione vendita aggiuntiva'
+    elif urgency_action == 'hold_insufficient_negative_evidence':
+        urgency_note = 'Segnali negativi insufficienti: nessuna pressione aggiuntiva dovuta all’urgenza'
+    elif urgency_action == 'standard_rules_only':
+        urgency_note = 'Fascia standard: nessuna pressione last-minute'
+    elif urgency_action == 'hold_no_negative_signals':
+        urgency_note = 'Nessun segnale negativo affidabile: prezzo protetto'
+    else:
+        urgency_note = 'Modello rischio invenduto non configurato: applicate le regole esistenti'
     reason = (f'Data {target_date.isoformat()} | Calendario proprio: {occupancy:.0%} nella finestra di 30 giorni '
               f'dalla data analizzata | Check-in tra {_format_lead_time(lead_time["hours_until_checkin"])} '
               f'({lead_time["lead_time_band"]}) | Anticipo {days_until} giorni | {rule} | '
               f'Riferimento EUR {reference:.2f} | Fattore occupazione {multiplier:.2f} | '
               f'{pacing_note} | Fattore pacing {pacing_multiplier:.2f} | '
               f'Fattore weekend impostato {weekend_multiplier:.2f}{gap_note}'
-              f'{" | Segnali in conflitto: prezzo invariato e revisione manuale" if signal_conflict else ""}. '
-              'Confronto competitor a cura del proprietario prima dell’approvazione.')
+              f' | {urgency_note}.')
     return {'recommended_price': recommended, 'delta_vs_base': round((recommended/current_price-1)*100, 2),
             'delta_vs_market': None, 'confidence_score': 0.0,
             'confidence_kind': 'not_estimated_rules_only', 'is_weekend': weekend,
@@ -368,6 +476,13 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
                 'timezone': lead_time['timezone'],
                 'gap_multiplier': gap_multiplier, 'gap_nights': gap_nights,
                 'signal_conflict': signal_conflict,
+                'negative_signals': negative_signals,
+                'positive_signals': positive_signals,
+                'rules_confidence': rules_confidence,
+                'unsold_risk_pressure': unsold_risk_pressure,
+                'urgency_weight': urgency_weight,
+                'urgency_action': urgency_action,
+                'base_effective_multiplier': base_effective_multiplier,
                 'effective_multiplier': effective_multiplier,
                 'unbounded_reference_target': round(candidate, 2),
                 'policy_fingerprint': policy_fingerprint(policy), 'manual_actions': manual_actions,

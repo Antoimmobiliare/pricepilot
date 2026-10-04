@@ -52,11 +52,21 @@ class OperationalApiTests(unittest.TestCase):
                 through_days=366, low_occupancy=.35, high_occupancy=.8,
                 low_multiplier=.9, high_multiplier=1.12,
             )],
+            unsold_risk={
+                "enabled": True,
+                "urgency_weights": {"STANDARD": 0, "WATCH": .15,
+                    "LAST_MINUTE": .4, "URGENT": .7, "SAME_DAY": 1},
+                "max_amplification": .5,
+                "max_total_discount": .15,
+                "minimum_negative_signals": 2,
+            },
         )
         saved = server.api_save_calendar_policy(self.prop["id"], policy, request)
         self.assertEqual(saved["account_id"], self.account)
         self.assertEqual(saved["checkin_time"], "15:00")
         self.assertEqual(saved["timezone"], "Europe/Rome")
+        self.assertTrue(saved["unsold_risk"]["enabled"])
+        self.assertEqual(saved["unsold_risk"]["urgency_weights"]["URGENT"], .7)
         self.assertTrue(server.api_get_calendar_policy(self.prop["id"], request)["enabled"])
 
         connection = server.Beds24ConnectionUpdate(

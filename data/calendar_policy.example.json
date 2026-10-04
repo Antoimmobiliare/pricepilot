@@ -10,6 +10,19 @@
     "weekend_multiplier": 1,
     "break_even": 0,
     "date_reference_prices": {},
+    "unsold_risk": {
+      "enabled": true,
+      "urgency_weights": {
+        "STANDARD": 0,
+        "WATCH": 0.15,
+        "LAST_MINUTE": 0.4,
+        "URGENT": 0.7,
+        "SAME_DAY": 1
+      },
+      "max_amplification": 0.5,
+      "max_total_discount": 0.15,
+      "minimum_negative_signals": 2
+    },
     "lead_time_bands": [
       {"through_days": 7, "low_occupancy": 0.4, "high_occupancy": 0.8, "low_multiplier": 0.9, "high_multiplier": 1.05},
       {"through_days": 30, "low_occupancy": 0.3, "high_occupancy": 0.7, "low_multiplier": 0.95, "high_multiplier": 1.05},

@@ -375,6 +375,7 @@ class CalendarPolicyUpdate(BaseModel):
     lead_time_bands: list[LeadTimeBand]
     pacing_rule: dict = Field(default_factory=dict)
     minimum_stay_rule: dict = Field(default_factory=dict)
+    unsold_risk: dict = Field(default_factory=dict)
 
 
 class Beds24ConnectionUpdate(BaseModel):
