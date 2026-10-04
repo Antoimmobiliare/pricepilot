@@ -5,6 +5,8 @@
     "account_id": null,
     "property_id": null,
     "reference_price": 100,
+    "checkin_time": "15:00",
+    "timezone": "Europe/Rome",
     "weekend_multiplier": 1,
     "break_even": 0,
     "date_reference_prices": {},

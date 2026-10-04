@@ -367,6 +367,8 @@ class LeadTimeBand(BaseModel):
 class CalendarPolicyUpdate(BaseModel):
     enabled: bool = False
     reference_price: float = Field(..., gt=0, le=100000)
+    checkin_time: str = "15:00"
+    timezone: str = "Europe/Rome"
     weekend_multiplier: float = Field(1, ge=.5, le=2)
     break_even: float = Field(0, ge=0, le=100000)
     date_reference_prices: dict[str, float] = Field(default_factory=dict)

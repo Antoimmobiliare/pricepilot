@@ -55,6 +55,8 @@ class OperationalApiTests(unittest.TestCase):
         )
         saved = server.api_save_calendar_policy(self.prop["id"], policy, request)
         self.assertEqual(saved["account_id"], self.account)
+        self.assertEqual(saved["checkin_time"], "15:00")
+        self.assertEqual(saved["timezone"], "Europe/Rome")
         self.assertTrue(server.api_get_calendar_policy(self.prop["id"], request)["enabled"])
 
         connection = server.Beds24ConnectionUpdate(

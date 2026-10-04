@@ -3,7 +3,7 @@
 Thresholds/multipliers are configuration, not learned market demand or forecasts.
 Using the same reference prevents repeated six-hour cycles compounding discounts.
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
 import math
@@ -16,13 +16,91 @@ from pricepilot.core.data_quality import DataUnavailable, validate_occupancy
 from pricepilot.pricing.safety import apply_all_safety
 
 
-def pricing_today():
+DEFAULT_PRICING_TIMEZONE = 'Europe/Rome'
+DEFAULT_CHECKIN_TIME = '15:00'
+
+LEAD_TIME_STANDARD = 'STANDARD'
+LEAD_TIME_WATCH = 'WATCH'
+LEAD_TIME_LAST_MINUTE = 'LAST_MINUTE'
+LEAD_TIME_URGENT = 'URGENT'
+LEAD_TIME_SAME_DAY = 'SAME_DAY'
+
+WATCH_MAX_HOURS = 72
+LAST_MINUTE_MAX_HOURS = 48
+URGENT_MAX_HOURS = 24
+
+
+def pricing_today(timezone_name=None):
     """Calendar day used for lead time, stable across local and cloud workers."""
-    name = os.getenv('PRICEPILOT_TIMEZONE', 'Europe/Rome').strip()
+    name = str(timezone_name or os.getenv('PRICEPILOT_TIMEZONE', DEFAULT_PRICING_TIMEZONE)).strip()
     try:
         return datetime.now(ZoneInfo(name)).date()
     except ZoneInfoNotFoundError:
         raise DataUnavailable('Fuso orario pricing non valido.') from None
+
+
+def _policy_timezone(policy):
+    name = str(policy.get('timezone') or DEFAULT_PRICING_TIMEZONE).strip()
+    try:
+        return name, ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        raise ValueError('Fuso orario della policy non valido.') from None
+
+
+def _policy_checkin_time(policy):
+    raw = str(policy.get('checkin_time') or DEFAULT_CHECKIN_TIME).strip()
+    try:
+        parsed = time.fromisoformat(raw)
+    except ValueError:
+        raise ValueError('Orario di check-in della policy non valido.') from None
+    if parsed.tzinfo is not None or parsed.second or parsed.microsecond:
+        raise ValueError('Orario di check-in della policy non valido.')
+    return raw, parsed
+
+
+def calculate_lead_time(*, target_date, policy, now=None, today=None):
+    """Return actual elapsed hours until local check-in and its urgency band."""
+    timezone_name, local_zone = _policy_timezone(policy)
+    checkin_time, local_checkin_time = _policy_checkin_time(policy)
+    if now is not None and now.tzinfo is None:
+        raise ValueError('Il datetime corrente deve includere il fuso orario.')
+    if now is None:
+        if today is not None:
+            now = datetime.combine(today, time.min, tzinfo=local_zone)
+        else:
+            now = datetime.now(local_zone)
+    current = now.astimezone(local_zone)
+    checkin = datetime.combine(target_date, local_checkin_time, tzinfo=local_zone)
+    elapsed = checkin.astimezone(timezone.utc) - current.astimezone(timezone.utc)
+    hours = elapsed.total_seconds() / 3600
+    days = (target_date - current.date()).days
+    if hours <= 0:
+        raise DataUnavailable('Check-in già trascorso: nessuna proposta ordinaria consentita.')
+    if target_date == current.date():
+        band = LEAD_TIME_SAME_DAY
+    elif hours <= URGENT_MAX_HOURS:
+        band = LEAD_TIME_URGENT
+    elif hours <= LAST_MINUTE_MAX_HOURS:
+        band = LEAD_TIME_LAST_MINUTE
+    elif hours <= WATCH_MAX_HOURS:
+        band = LEAD_TIME_WATCH
+    else:
+        band = LEAD_TIME_STANDARD
+    return {
+        'hours_until_checkin': hours,
+        'days_until': days,
+        'lead_time_band': band,
+        'urgency_band': band,
+        'checkin_datetime': checkin.isoformat(),
+        'checkin_time': checkin_time,
+        'timezone': timezone_name,
+    }
+
+
+def _format_lead_time(hours):
+    total_minutes = max(0, int(round(float(hours) * 60)))
+    whole_hours, minutes = divmod(total_minutes, 60)
+    return f'{whole_hours}h {minutes:02d}m'
 
 
 def load_policy(account_id, property_id):
@@ -59,6 +137,8 @@ def finite(value, low, high):
 
 
 def validate_policy(policy):
+    _policy_timezone(policy)
+    _policy_checkin_time(policy)
     finite(policy['reference_price'], .01, 100000)
     finite(policy.get('weekend_multiplier', 1), .5, 2)
     finite(policy.get('break_even', 0), 0, 100000)
@@ -169,11 +249,12 @@ def enrich_gap_context(account_id, property_id, target_date, context, policy):
 
 
 def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
-                             min_price, max_price, max_change_pct, today=None, inventory_context=None):
+                             min_price, max_price, max_change_pct, today=None, now=None,
+                             inventory_context=None):
     validate_policy(policy)
     validate_occupancy(occupancy)
-    today = today or pricing_today()
-    days_until = (target_date - today).days
+    lead_time = calculate_lead_time(target_date=target_date, policy=policy, now=now, today=today)
+    days_until = lead_time['days_until']
     if not 0 <= days_until <= 366:
         raise DataUnavailable('Data fuori dall’orizzonte calendario.')
     band = next(b for b in policy['lead_time_bands'] if days_until <= b['through_days'])
@@ -258,7 +339,8 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
         max_price=max_price, max_change_pct=max_change_pct,
         break_even=float(policy.get('break_even', 0)), lead_time_limits=False)
     reason = (f'Data {target_date.isoformat()} | Calendario proprio: {occupancy:.0%} nella finestra di 30 giorni '
-              f'dalla data analizzata | Anticipo {days_until} giorni | {rule} | '
+              f'dalla data analizzata | Check-in tra {_format_lead_time(lead_time["hours_until_checkin"])} '
+              f'({lead_time["lead_time_band"]}) | Anticipo {days_until} giorni | {rule} | '
               f'Riferimento EUR {reference:.2f} | Fattore occupazione {multiplier:.2f} | '
               f'{pacing_note} | Fattore pacing {pacing_multiplier:.2f} | '
               f'Fattore weekend impostato {weekend_multiplier:.2f}{gap_note}'
@@ -267,11 +349,23 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
     return {'recommended_price': recommended, 'delta_vs_base': round((recommended/current_price-1)*100, 2),
             'delta_vs_market': None, 'confidence_score': 0.0,
             'confidence_kind': 'not_estimated_rules_only', 'is_weekend': weekend,
-            'has_event': False, 'days_until': days_until, 'safety_note': safety,
+            'has_event': False, 'days_until': days_until,
+            'hours_until_checkin': lead_time['hours_until_checkin'],
+            'lead_time_band': lead_time['lead_time_band'],
+            'urgency_band': lead_time['urgency_band'],
+            'checkin_datetime': lead_time['checkin_datetime'],
+            'timezone': lead_time['timezone'],
+            'safety_note': safety,
             'reason': reason, 'breakdown': {'pricing_basis': 'calendar_only',
                 'reference_price': reference, 'occupancy_multiplier': multiplier,
                 'pacing_multiplier': pacing_multiplier, 'pickup_7d_nights': pickup,
                 'weekend_multiplier': weekend_multiplier, 'lead_time_days': days_until,
+                'hours_until_checkin': lead_time['hours_until_checkin'],
+                'lead_time_band': lead_time['lead_time_band'],
+                'urgency_band': lead_time['urgency_band'],
+                'checkin_datetime': lead_time['checkin_datetime'],
+                'checkin_time': lead_time['checkin_time'],
+                'timezone': lead_time['timezone'],
                 'gap_multiplier': gap_multiplier, 'gap_nights': gap_nights,
                 'signal_conflict': signal_conflict,
                 'effective_multiplier': effective_multiplier,

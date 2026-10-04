@@ -1,5 +1,5 @@
 """Own-calendar workflow: no market access, mandatory human approval."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from copy import deepcopy
 from contextlib import ExitStack
 import json
@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from pricepilot.core import database as db
 from pricepilot.core.config import CONFIG
@@ -145,6 +146,125 @@ class CalendarRuleTests(unittest.TestCase):
                 self.assertEqual(load_policy(1, 2)['reference_price'], 100)
                 with self.assertRaises(DataUnavailable): load_policy(99, 2)
 
+    def test_hourly_lead_time_band_boundaries(self):
+        zone = ZoneInfo('Europe/Rome')
+        checkin = datetime(2026, 10, 10, 15, 0, tzinfo=zone)
+        cases = [
+            (73, 'STANDARD'),
+            (72, 'WATCH'),
+            (60, 'WATCH'),
+            (48, 'LAST_MINUTE'),
+            (36, 'LAST_MINUTE'),
+            (24, 'URGENT'),
+            (17, 'URGENT'),
+        ]
+        for hours, expected in cases:
+            with self.subTest(hours=hours):
+                result = self.calculate(
+                    target_date=checkin.date(), now=checkin-timedelta(hours=hours))
+                self.assertEqual(result['lead_time_band'], expected)
+                self.assertAlmostEqual(result['hours_until_checkin'], hours)
+                self.assertEqual(result['breakdown']['lead_time_band'], expected)
+                self.assertEqual(result['breakdown']['timezone'], 'Europe/Rome')
+
+    def test_naive_current_datetime_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'fuso orario'):
+            self.calculate(target_date=date(2026, 10, 10),
+                           now=datetime(2026, 10, 9, 15, 0))
+
+    def test_same_day_before_checkin_and_passed_checkin(self):
+        zone = ZoneInfo('Europe/Rome')
+        target = date(2026, 10, 10)
+        before = self.calculate(target_date=target,
+                                now=datetime(2026, 10, 10, 10, 30, tzinfo=zone))
+        self.assertEqual(before['lead_time_band'], 'SAME_DAY')
+        self.assertAlmostEqual(before['hours_until_checkin'], 4.5)
+        with self.assertRaisesRegex(DataUnavailable, 'Check-in già trascorso'):
+            self.calculate(target_date=target,
+                           now=datetime(2026, 10, 10, 15, 0, tzinfo=zone))
+        with self.assertRaisesRegex(DataUnavailable, 'Check-in già trascorso'):
+            self.calculate(target_date=target,
+                           now=datetime(2026, 10, 10, 15, 1, tzinfo=zone))
+
+    def test_timezone_and_dst_use_actual_elapsed_hours(self):
+        zone = ZoneInfo('Europe/Rome')
+        result = self.calculate(
+            target_date=date(2026, 3, 30),
+            now=datetime(2026, 3, 28, 15, 0, tzinfo=zone),
+        )
+        self.assertEqual(result['timezone'], 'Europe/Rome')
+        self.assertEqual(result['checkin_datetime'], '2026-03-30T15:00:00+02:00')
+        self.assertAlmostEqual(result['hours_until_checkin'], 47)
+        self.assertEqual(result['lead_time_band'], 'LAST_MINUTE')
+
+    def test_gap_and_last_minute_are_both_preserved_without_stacking(self):
+        own = policy()
+        own['gap_rule'] = {'enabled': True, 'max_nights': 2, 'through_days': 21,
+                           'multiplier': .9}
+        zone = ZoneInfo('Europe/Rome')
+        checkin = datetime(2026, 10, 10, 15, 0, tzinfo=zone)
+        result = self.calculate(
+            target_date=checkin.date(), now=checkin-timedelta(hours=30), policy=own,
+            occupancy=.6, inventory_context={'gap_nights': 1,
+                'gap_boundaries_confirmed': True, 'minimum_stay': 1},
+        )
+        self.assertEqual(result['lead_time_band'], 'LAST_MINUTE')
+        self.assertEqual(result['breakdown']['gap_nights'], 1)
+        self.assertEqual(result['breakdown']['gap_multiplier'], .9)
+        self.assertEqual(result['breakdown']['effective_multiplier'], .9)
+
+    def test_existing_policy_without_time_fields_uses_safe_defaults(self):
+        zone = ZoneInfo('Europe/Rome')
+        result = self.calculate(
+            target_date=date(2026, 10, 10),
+            now=datetime(2026, 10, 9, 15, 0, tzinfo=zone),
+        )
+        self.assertEqual(result['timezone'], 'Europe/Rome')
+        self.assertEqual(result['checkin_datetime'], '2026-10-10T15:00:00+02:00')
+        self.assertEqual(result['lead_time_band'], 'URGENT')
+
+    def test_checkin_time_and_timezone_are_overridable_per_policy(self):
+        own = policy()
+        own['checkin_time'] = '17:30'
+        own['timezone'] = 'America/New_York'
+        zone = ZoneInfo('America/New_York')
+        result = self.calculate(
+            target_date=date(2026, 10, 10), policy=own,
+            now=datetime(2026, 10, 10, 16, 0, tzinfo=zone),
+        )
+        self.assertEqual(result['timezone'], 'America/New_York')
+        self.assertEqual(result['checkin_datetime'], '2026-10-10T17:30:00-04:00')
+        self.assertAlmostEqual(result['hours_until_checkin'], 1.5)
+        self.assertEqual(result['lead_time_band'], 'SAME_DAY')
+
+    def test_urgency_band_does_not_change_price_automatically(self):
+        zone = ZoneInfo('Europe/Rome')
+        checkin = datetime(2026, 10, 10, 15, 0, tzinfo=zone)
+        last_minute = self.calculate(
+            target_date=checkin.date(), now=checkin-timedelta(hours=25))
+        urgent = self.calculate(
+            target_date=checkin.date(), now=checkin-timedelta(hours=23))
+        self.assertEqual(last_minute['lead_time_band'], 'LAST_MINUTE')
+        self.assertEqual(urgent['lead_time_band'], 'URGENT')
+        self.assertEqual(last_minute['days_until'], urgent['days_until'])
+        self.assertEqual(last_minute['recommended_price'], urgent['recommended_price'])
+        self.assertEqual(last_minute['breakdown']['effective_multiplier'],
+                         urgent['breakdown']['effective_multiplier'])
+
+    def test_urgency_band_change_invalidates_proposal_deduplication(self):
+        prior = {'policy_fingerprint': 'x', 'current_price_source': 'beds24_observation',
+                 'reference_price': 100, 'occupancy_multiplier': 1,
+                 'pacing_multiplier': 1, 'pickup_7d_nights': 0,
+                 'weekend_multiplier': 1, 'lead_time_days': 2,
+                 'lead_time_band': 'WATCH', 'checkin_datetime': '2026-10-10T15:00:00+02:00',
+                 'timezone': 'Europe/Rome', 'gap_multiplier': 1,
+                 'gap_nights': None, 'effective_multiplier': 1, 'manual_actions': []}
+        row = {'old_price': 100, 'new_price': 100, 'mode': 'approval',
+               'decision': 'PENDING_APPROVAL', 'factors': json.dumps(prior),
+               'timestamp': datetime.now(ZoneInfo('UTC')).isoformat()}
+        changed = {**prior, 'lead_time_band': 'URGENT', 'lead_time_days': 1}
+        self.assertFalse(engine._reuse_proposal(row, 100, 100, changed, 'approval'))
+
 
 class CalendarWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -236,6 +356,18 @@ class CalendarWorkflowTests(unittest.TestCase):
                                   'decision_log_id': result['log_id'],
                                   'recommended_price': result['recommended_price'],
                                   'status': 'pending_approval'})
+        blocked = engine.approve_decision(result['log_id'], self.account_id)
+        self.assertEqual(blocked['status'], 'expired_or_missing_data')
+        self.channel.assert_not_called()
+
+    def test_changed_urgency_band_blocks_approval_revalidation(self):
+        result = self.run_decision()
+        row = db.get_decision_log_entry(result['log_id'], self.account_id)
+        factors = json.loads(row['factors'])
+        factors['lead_time_band'] = 'SAME_DAY'
+        with db.get_conn() as conn:
+            conn.execute('UPDATE decision_log SET factors=? WHERE id=?',
+                         (json.dumps(factors), result['log_id']))
         blocked = engine.approve_decision(result['log_id'], self.account_id)
         self.assertEqual(blocked['status'], 'expired_or_missing_data')
         self.channel.assert_not_called()

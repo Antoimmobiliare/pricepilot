@@ -61,7 +61,8 @@ def _reuse_proposal(row, old_price, new_price, factors, mode):
         previous = json.loads(row.get('factors') or '{}')
         context_keys = ('policy_fingerprint', 'current_price_source', 'reference_price',
                         'occupancy_multiplier', 'pacing_multiplier', 'pickup_7d_nights',
-                        'weekend_multiplier', 'lead_time_days', 'gap_multiplier',
+                        'weekend_multiplier', 'lead_time_days', 'lead_time_band',
+                        'checkin_datetime', 'timezone', 'gap_multiplier',
                         'gap_nights', 'effective_multiplier', 'manual_actions')
         previous_context = {key: previous.get(key) for key in context_keys}
         current_context = {key: factors.get(key) for key in context_keys}
@@ -311,6 +312,7 @@ def _process_decision(
         pricing = calculate_calendar_price(current_price=base_price, occupancy=occupancy,
             target_date=d, policy=policy, min_price=min_price, max_price=max_price,
             max_change_pct=float(guardrails.get("max_change_pct", 0.20)), inventory_context=inventory_context)
+        days_until = pricing['days_until']
         has_event, event, event_label = False, "", ""
     else:
         pricing = calculate_recommended_price(
@@ -564,6 +566,11 @@ def _process_decision(
         "guardrail_status":  "review_required" if guardrail_reasons else "ok",
         "guardrail_reasons": guardrail_reasons,
         "days_until":        days_until,
+        "hours_until_checkin": pricing.get("hours_until_checkin"),
+        "lead_time_band":    pricing.get("lead_time_band"),
+        "urgency_band":      pricing.get("urgency_band"),
+        "checkin_datetime":  pricing.get("checkin_datetime"),
+        "timezone":          pricing.get("timezone"),
         "data_source":       market_result.source or data_source,
         "occupancy_source":  occupancy_source,
         "calendar_status":   calendar_status,
@@ -932,6 +939,10 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
                     refreshed = calculate_calendar_price(current_price=current, occupancy=inventory.occupancy,
                         target_date=target_date, policy=policy, min_price=float(prop['min_price']),
                         max_price=float(prop['max_price']), max_change_pct=float(guardrails.get('max_change_pct', .2)), inventory_context=refreshed_context)
+                    refreshed_factors = refreshed.get('breakdown') or {}
+                    for key in ('lead_time_band', 'checkin_datetime', 'timezone'):
+                        if factors.get(key) != refreshed_factors.get(key):
+                            raise ValueError()
                     if abs(refreshed['recommended_price']-new_price) > .005:
                         raise ValueError()
                 else:
