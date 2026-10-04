@@ -305,6 +305,64 @@ class CalendarRuleTests(unittest.TestCase):
         self.assertTrue(all(result['breakdown']['urgency_action'] == 'amplify_negative_signals'
                             for result in results))
 
+    def test_single_weak_occupancy_keeps_base_rule_without_urgency_amplification(self):
+        cases = [(60, 'WATCH'), (36, 'LAST_MINUTE'),
+                 (17, 'URGENT'), (4, 'SAME_DAY')]
+        for hours, expected_band in cases:
+            with self.subTest(band=expected_band):
+                result = self.risk_calculate(hours, occupancy=.2)
+                self.assertEqual(result['lead_time_band'], expected_band)
+                self.assertEqual(result['recommended_price'], 90)
+                self.assertEqual(result['breakdown']['base_effective_multiplier'], .9)
+                self.assertEqual(result['breakdown']['effective_multiplier'], .9)
+                self.assertEqual(result['breakdown']['urgency_action'],
+                                 'hold_insufficient_negative_evidence')
+
+    def test_single_weak_pickup_keeps_existing_base_economics(self):
+        result = self.risk_calculate(17, occupancy=.6, context={
+            'metrics_complete': True, 'pickup_7d_nights': 0})
+        self.assertEqual(result['lead_time_band'], 'URGENT')
+        self.assertEqual(result['recommended_price'], 100)
+        self.assertEqual(result['breakdown']['pacing_multiplier'], .95)
+        self.assertEqual(result['breakdown']['base_effective_multiplier'], 1)
+        self.assertEqual(result['breakdown']['effective_multiplier'], 1)
+        self.assertEqual(result['breakdown']['urgency_action'],
+                         'hold_insufficient_negative_evidence')
+
+    def test_urgent_and_same_day_positive_signals_never_become_discounts(self):
+        cases = [
+            ('occupancy_strong', .9, {}, 105),
+            ('pickup_strong', .6,
+             {'metrics_complete': True, 'pickup_7d_nights': 7}, 108),
+            ('both_strong', .9,
+             {'metrics_complete': True, 'pickup_7d_nights': 7}, 108),
+        ]
+        for hours, band in ((17, 'URGENT'), (4, 'SAME_DAY')):
+            for label, occupancy, context, expected_price in cases:
+                with self.subTest(band=band, signals=label):
+                    result = self.risk_calculate(hours, occupancy=occupancy,
+                                                 context=context)
+                    self.assertEqual(result['lead_time_band'], band)
+                    self.assertEqual(result['recommended_price'], expected_price)
+                    self.assertGreaterEqual(result['breakdown']['effective_multiplier'], 1)
+                    self.assertEqual(result['breakdown']['urgency_action'],
+                                     'hold_positive_signals')
+
+    def test_risk_conflict_blocks_only_amplification_not_valid_base_increase(self):
+        result = self.risk_calculate(17, occupancy=.9, context={
+            'metrics_complete': True, 'pickup_7d_nights': 0})
+        self.assertTrue(result['breakdown']['signal_conflict'])
+        self.assertFalse(result['breakdown']['base_signal_conflict'])
+        self.assertEqual(result['breakdown']['base_effective_multiplier'], 1.05)
+        self.assertEqual(result['breakdown']['effective_multiplier'], 1.05)
+        self.assertEqual(result['recommended_price'], 105)
+        self.assertEqual(result['breakdown']['urgency_action'], 'hold_signal_conflict')
+
+        legacy_conflict = self.risk_calculate(17, occupancy=.2, context={
+            'metrics_complete': True, 'pickup_7d_nights': 7})
+        self.assertTrue(legacy_conflict['breakdown']['base_signal_conflict'])
+        self.assertEqual(legacy_conflict['recommended_price'], 100)
+
     def test_last_minute_and_same_day_positive_signals_do_not_force_floor(self):
         context = {'metrics_complete': True, 'pickup_7d_nights': 7}
         last_minute = self.risk_calculate(36, occupancy=.9, context=context,
@@ -362,6 +420,23 @@ class CalendarRuleTests(unittest.TestCase):
         limited = self.risk_calculate(4, context=context, max_change_pct=.05)
         self.assertGreaterEqual(floor['recommended_price'], 94)
         self.assertGreaterEqual(limited['recommended_price'], 95)
+
+    def test_max_total_discount_caps_risk_component_before_weekend_and_safety(self):
+        context = {'metrics_complete': True, 'pickup_7d_nights': 0,
+                   'gap_nights': 1, 'gap_boundaries_confirmed': True,
+                   'minimum_stay': 1}
+        own = risk_policy()
+        own['weekend_multiplier'] = 1.1
+        result = self.risk_calculate(4, context=context, own=own)
+        self.assertEqual(result['breakdown']['base_effective_multiplier'], .9)
+        self.assertAlmostEqual(result['breakdown']['effective_multiplier'], .85)
+        self.assertEqual(result['breakdown']['unbounded_reference_target'], 93.5)
+        self.assertEqual(result['recommended_price'], 93.5)
+
+        protected = self.risk_calculate(4, context=context, own=own,
+                                        min_price=92, break_even=94,
+                                        max_change_pct=.05)
+        self.assertEqual(protected['recommended_price'], 95)
 
     def test_legacy_policy_preserves_previous_economics_and_reports_disabled(self):
         legacy = policy()

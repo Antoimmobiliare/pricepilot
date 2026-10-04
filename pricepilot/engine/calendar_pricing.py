@@ -351,7 +351,12 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
             'suggested_minimum_stay': gap_nights,
             'reason': f'Vuoto di {gap_nights} notti tra prenotazioni confermate non prenotabile con soggiorno minimo {context["minimum_stay"]}.',
         })
-    signal_conflict = multiplier < 1 and pacing_multiplier > 1
+    # Preserve the pre-unsold-risk rule: weak occupancy combined with strong
+    # pickup is a base-pricing conflict and keeps the published price.  The
+    # broader risk conflict below has a narrower purpose: it blocks only the
+    # extra urgency amplification when any observed signals disagree.
+    base_signal_conflict = multiplier < 1 and pacing_multiplier > 1
+    signal_conflict = base_signal_conflict
     risk = _unsold_risk_settings(policy)
     risk_enabled = risk['enabled'] is True
     negative_signals = []
@@ -379,15 +384,16 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
             'occupancy': occupancy,
             'pickup_7d_nights': pickup,
             'reason': (
-                'Segnali propri positivi e negativi in conflitto: mantenere il prezzo '
-                'e verificare calendario, pickup e durata delle nuove prenotazioni.'
+                'Segnali propri positivi e negativi in conflitto: non amplificare '
+                'la pressione last-minute e verificare calendario, pickup e durata '
+                'delle nuove prenotazioni.'
             ),
         })
     # Upward evidence wins over a discount. Discounts never stack: first find
     # one base multiplier from explicit owner rules, then optionally strengthen
     # that same reduction using coherent, observed evidence.
     upward = [m for m in (multiplier, pacing_multiplier) if m > 1]
-    if signal_conflict:
+    if base_signal_conflict:
         effective_multiplier = 1.0
     elif upward:
         effective_multiplier = max(upward)
@@ -424,16 +430,22 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
     rules_confidence = ('conflicted' if signal_conflict else
                         'supported' if len(negative_signals) >= risk['minimum_negative_signals'] else
                         'limited')
-    # Due segnali contrari non giustificano una variazione. Conserviamo il
-    # prezzo pubblicato anche nel weekend e chiediamo una revisione umana.
-    candidate = current_price if signal_conflict else reference * effective_multiplier * weekend_multiplier
+    # A risk-level conflict blocks only the urgency amplification.  The legacy
+    # occupancy-low/pickup-high conflict still keeps the published price;
+    # otherwise an independently justified base rule remains effective.
+    candidate = (current_price if base_signal_conflict else
+                 reference * effective_multiplier * weekend_multiplier)
     # Only explicit owner constraints, no hidden market/weekend/demand floors.
     recommended, safety = apply_all_safety(
         old_price=current_price, new_price=candidate, min_price=min_price,
         max_price=max_price, max_change_pct=max_change_pct,
         break_even=float(policy.get('break_even', 0)), lead_time_limits=False)
-    if signal_conflict:
-        urgency_note = 'Segnali positivi e negativi in conflitto; prezzo invariato e revisione prudente'
+    if base_signal_conflict:
+        urgency_note = ('Segnali positivi e negativi in conflitto; prezzo invariato '
+                        'e revisione prudente')
+    elif signal_conflict:
+        urgency_note = ('Segnali positivi e negativi in conflitto; nessuna pressione '
+                        'last-minute aggiuntiva e revisione prudente')
     elif urgency_action == 'amplify_negative_signals':
         urgency_note = ('I segnali negativi coerenti aumentano il rischio di invenduto; '
                         'pressione vendita applicata entro i guardrail')
@@ -475,6 +487,7 @@ def calculate_calendar_price(*, current_price, occupancy, target_date, policy,
                 'checkin_time': lead_time['checkin_time'],
                 'timezone': lead_time['timezone'],
                 'gap_multiplier': gap_multiplier, 'gap_nights': gap_nights,
+                'base_signal_conflict': base_signal_conflict,
                 'signal_conflict': signal_conflict,
                 'negative_signals': negative_signals,
                 'positive_signals': positive_signals,
