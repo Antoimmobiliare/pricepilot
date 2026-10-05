@@ -429,7 +429,7 @@ def send_existing_pending_approval(log_id: int, account_id: int) -> Dict:
     """
     from pricepilot.core.database import (
         get_decision_log_entry, get_property, get_telegram_link_by_property,
-        get_notification_preferences, record_notification_log,
+        get_notification_preferences, get_calendar_price, record_notification_log,
     )
 
     row = get_decision_log_entry(int(log_id), account_id=int(account_id))
@@ -447,6 +447,10 @@ def send_existing_pending_approval(log_id: int, account_id: int) -> Dict:
                 "message_id": str(row.get("tg_message_id"))}
 
     property_id = int(row.get("property_id") or 0)
+    calendar = get_calendar_price(property_id, str(row.get("date") or ""), int(account_id))
+    if (not calendar or calendar.get("decision_log_id") != int(log_id)
+            or str(calendar.get("status") or "") != "pending_approval"):
+        return {"ok": False, "error": "decision_not_pending"}
     prop = get_property(property_id, account_id=int(account_id))
     link = get_telegram_link_by_property(property_id)
     prefs = get_notification_preferences(int(account_id), property_id)
@@ -649,7 +653,8 @@ def _review_pending(log_id, chat_id):
     if not 0 <= (datetime.now(timezone.utc)-stamp).total_seconds() <= 6*3600:
         return False
     current = get_calendar_price(context['property_id'], row['date'], context['account_id'])
-    if not current or current.get('decision_log_id') != log_id:
+    if (not current or current.get('decision_log_id') != log_id
+            or current.get('status') != 'pending_approval'):
         return False
     candidates = get_decision_log(limit=1000, property_id=context['property_id'], account_id=context['account_id'])
     remaining = []
@@ -658,7 +663,8 @@ def _review_pending(log_id, chat_id):
         if candidate['id'] == log_id or candidate['date'] <= row['date'] or not state.startswith('PENDING_APPROVAL') or '[' in state:
             continue
         pointer = get_calendar_price(context['property_id'], candidate['date'], context['account_id'])
-        if pointer and pointer.get('decision_log_id') == candidate['id']:
+        if (pointer and pointer.get('decision_log_id') == candidate['id']
+                and pointer.get('status') == 'pending_approval'):
             remaining.append(candidate)
     remaining.sort(key=lambda c: c['date'])
     from pricepilot.engine.decision_engine import _scoped_property

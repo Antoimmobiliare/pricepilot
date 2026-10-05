@@ -25,17 +25,24 @@ def _checkpoint(stage: str, *, run_id: int, account_id: int, property_id=None, t
     logger.info("pricing_cycle_checkpoint %s", context)
 
 
-def _cycle_timeout_seconds() -> float:
+def _cycle_timeout_seconds(horizon_days: int = 90) -> float:
     """Limite duro per un ciclo operativo, inclusi i lock cloud.
 
     Un provider cloud degradato non deve lasciare una run ``running`` per
     sempre. Il valore resta configurabile per worker lenti, ma ha un limite
     minimo per evitare configurazioni accidentali non deterministiche.
     """
-    try:
-        value = float(os.getenv("PRICEPILOT_CYCLE_TIMEOUT_SECONDS", "180"))
-    except (TypeError, ValueError):
-        value = 180.0
+    configured = os.getenv("PRICEPILOT_CYCLE_TIMEOUT_SECONDS")
+    if configured is None or not configured.strip():
+        # The first live run measured about five seconds per processed date,
+        # plus roughly one minute for inventory acquisition/persistence. Keep
+        # the deadline finite while sizing it for the requested horizon.
+        value = max(180.0, 60.0 + 6.0 * int(horizon_days))
+    else:
+        try:
+            value = float(configured)
+        except (TypeError, ValueError):
+            value = max(180.0, 60.0 + 6.0 * int(horizon_days))
     return max(1.0, min(value, 3600.0))
 
 
@@ -140,7 +147,8 @@ def run_pricing_cycle(
     next_run_at = (datetime.utcnow() + timedelta(hours=effective_interval)).isoformat()
     # A stale run must be reclaimable shortly after the deterministic cycle
     # deadline, rather than waiting for the full six-hour analysis interval.
-    stale_after_minutes = max(5, int((_cycle_timeout_seconds() / 60) + 2))
+    cycle_timeout = _cycle_timeout_seconds(horizon)
+    stale_after_minutes = max(5, int((cycle_timeout / 60) + 2))
     run_id, active_run = try_start_operation_run(
         account_id=account_id,
         source=source,
@@ -170,7 +178,7 @@ def run_pricing_cycle(
         }
     if run_id is None:
         raise RuntimeError("Impossibile avviare il ciclo pricing.")
-    cycle_deadline = time.monotonic() + _cycle_timeout_seconds()
+    cycle_deadline = time.monotonic() + cycle_timeout
     _checkpoint("run_started", run_id=run_id, account_id=account_id)
     properties = get_properties(account_id=account_id)
     results = []
@@ -199,6 +207,9 @@ def run_pricing_cycle(
         },
     )
 
+    from pricepilot.services.operational_store import operational_read_cache
+    cycle_cache = operational_read_cache()
+    cycle_cache.__enter__()
     try:
         for prop in properties:
             if time.monotonic() >= cycle_deadline:
@@ -216,7 +227,9 @@ def run_pricing_cycle(
                     continue
             for offset in range(horizon):
                 if time.monotonic() >= cycle_deadline:
-                    raise TimeoutError("Ciclo pricing oltre il limite operativo; lock cloud non conclusivo.")
+                    raise TimeoutError(
+                        "Ciclo pricing oltre il limite operativo; orizzonte non completato."
+                    )
                 d = start_date + timedelta(days=offset)
                 _checkpoint("date_start", run_id=run_id, account_id=account_id, property_id=prop["id"], target_date=d)
                 try:
@@ -246,6 +259,8 @@ def run_pricing_cycle(
                         defer_notifications=True,
                         account_id=account_id,
                         _cycle_deadline=cycle_deadline,
+                        _prevalidated_property=prop,
+                        _prevalidated_observation=occupancy,
                     )
                     results.append(result)
                     property_results.append({
@@ -314,8 +329,10 @@ def run_pricing_cycle(
             status=status,
             details=summary,
         )
+        cycle_cache.__exit__(None, None, None)
         return {"run": run, "results": results, "errors": errors}
     except BaseException as exc:
+        cycle_cache.__exit__(type(exc), exc, exc.__traceback__)
         _checkpoint("run_failed", run_id=run_id, account_id=account_id, error=type(exc).__name__)
         run = finish_operation_run(
             run_id=run_id,

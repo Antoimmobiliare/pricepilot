@@ -19,6 +19,15 @@ STAMP = '2026-09-10T12:00:00+00:00'
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_calendar_batch_rejects_cross_tenant_or_cross_property_rows(self):
+        from pricepilot.core.database import upsert_calendar_prices
+        base = {'account_id': 1, 'property_id': 2, 'date': DAY.isoformat(),
+                'current_price': 100}
+        with self.assertRaises(ValueError):
+            upsert_calendar_prices([base, {**base, 'account_id': 9}])
+        with self.assertRaises(ValueError):
+            upsert_calendar_prices([base, {**base, 'property_id': 9}])
+
     def calendar(self, availability):
         return [{'propertyId': 10, 'roomId': 20, 'calendar': [
             {'from': (DAY + timedelta(days=i)).isoformat(), 'numAvail': value,
@@ -104,7 +113,9 @@ class SnapshotTests(unittest.TestCase):
 
     def test_sync_keeps_existing_decision_fields_and_manual_lock(self):
         prior = {'recommended_price': 110, 'applied_price': 105, 'decision_log_id': 7,
-                 'status': 'pending_approval', 'notes': 'Existing decision'}
+                 'status': 'pending_approval', 'notes': 'Existing decision',
+                 'date': DAY.isoformat()}
+        locked = {'status': 'locked', 'date': (DAY + timedelta(days=1)).isoformat()}
         rows = [{'account_id': 1, 'property_id': 2, 'date': (DAY + timedelta(days=i)).isoformat(),
                  'current_price': 101, 'observed_at': STAMP} for i in range(2)]
         with patch('pricepilot.services.beds24_sync.load_mapping', return_value=MAPPING), \
@@ -114,11 +125,14 @@ class SnapshotTests(unittest.TestCase):
              patch('pricepilot.services.operational_store.invalidate_snapshot'), \
              patch('pricepilot.services.operational_store.save_snapshot'), \
              patch('pricepilot.services.beds24_sync.publish_snapshot'), \
-             patch('pricepilot.core.database.get_calendar_price', side_effect=[prior, {'status': 'locked'}]), \
-             patch('pricepilot.core.database.upsert_calendar_price') as write:
+             patch('pricepilot.core.database.get_price_calendar', return_value=[prior, locked]) as read, \
+             patch('pricepilot.core.database.upsert_calendar_prices') as write:
             sync_property(1, 2, DAY, 3)
+        read.assert_called_once()
         write.assert_called_once()
-        actual = write.call_args.args[0]
+        batch = write.call_args.args[0]
+        self.assertEqual(len(batch), 1)
+        actual = batch[0]
         for key, value in prior.items():
             self.assertEqual(actual[key], value)
         self.assertEqual(actual['current_price'], 101)
@@ -133,8 +147,8 @@ class SnapshotTests(unittest.TestCase):
              patch('pricepilot.services.beds24_sync.normalize_reservations', return_value=[]), \
              patch('pricepilot.services.operational_store.invalidate_snapshot'), \
              patch('pricepilot.services.operational_store.save_snapshot'), \
-             patch('pricepilot.core.database.get_calendar_price', return_value=None), \
-             patch('pricepilot.core.database.upsert_calendar_price'):
+             patch('pricepilot.core.database.get_price_calendar', return_value=[]), \
+             patch('pricepilot.core.database.upsert_calendar_prices'):
             sync_property(1, 2, DAY, 3)
         fake.calendar.assert_called_once_with(MAPPING, DAY, DAY + timedelta(days=31))
         fake.bookings.assert_called_once_with(MAPPING, DAY - timedelta(days=90), DAY + timedelta(days=32))

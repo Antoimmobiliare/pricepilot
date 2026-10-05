@@ -149,6 +149,8 @@ def _process_decision(
     occupancy_source: str = "demo",
     defer_notifications: bool = False,
     account_id: Optional[int] = None,
+    _prevalidated_property: Optional[Dict] = None,
+    _prevalidated_observation=None,
 ) -> Dict:
     """
     Entry point principale del Decision Engine.
@@ -180,15 +182,28 @@ def _process_decision(
     """
     d    = target_date or pricing_today()
     own_calendar = calendar_pricing_enabled()
-    prop = _scoped_property(property_id, account_id)
+    prop = _prevalidated_property or _scoped_property(property_id, account_id)
 
-    if not prop:
+    if (not prop or int(prop.get("id") or 0) != int(property_id)
+            or (account_id is not None and int(prop.get("account_id") or 0) != int(account_id))):
         raise ValueError("Proprieta non trovata: nessuna configurazione inventata.")
     inventory_context = {}
     if not demo_enabled():
         from pricepilot.providers.registry import get_occupancy_provider
-        observation = get_occupancy_provider().estimate(property_id=property_id, target_date=d,
-                                                        account_id=int(prop.get("account_id") or 1))
+        observation = _prevalidated_observation or get_occupancy_provider().estimate(
+            property_id=property_id, target_date=d,
+            account_id=int(prop.get("account_id") or 1),
+        )
+        if _prevalidated_observation is not None:
+            raw = observation.raw or {}
+            expected_scope = (
+                int(prop.get("account_id") or 1), int(property_id), d.isoformat()
+            )
+            actual_scope = (
+                raw.get("account_id"), raw.get("property_id"), raw.get("target_date")
+            )
+            if actual_scope != expected_scope:
+                raise DataUnavailable("Osservazione occupancy preparata fuori account/appartamento/data.")
         if observation.raw.get("target_state") != "open":
             raise DataUnavailable("Data non vendibile o stato inventario sconosciuto.")
         occupancy, occupancy_source = observation.occupancy, observation.source
@@ -590,7 +605,12 @@ def process_decision(*args, **kwargs):
     values = bound.arguments
     if values['account_id'] is None and not demo_enabled():
         raise ValueError('account_id obbligatorio per il pricing operativo.')
-    prop = _scoped_property(values['property_id'], values['account_id'])
+    prop = values.get('_prevalidated_property') or _scoped_property(
+        values['property_id'], values['account_id']
+    )
+    if (prop and (int(prop.get('id') or 0) != int(values['property_id'])
+            or int(prop.get('account_id') or 0) != int(values['account_id'] or prop.get('account_id') or 0))):
+        prop = None
     if not prop:
         raise ValueError('Proprieta non disponibile per questo account.')
     with pricing_date_lease(int(prop.get('account_id') or 1), int(prop['id']), (values['target_date'] or pricing_today()).isoformat(), deadline=cycle_deadline):
@@ -918,8 +938,9 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
             return {"approved": False, "applied": False, "status": "invalid_date"}
         current, source = get_current_price_for_date(prop, target_date.isoformat())
         calendar = get_calendar_price(int(property_id), target_date.isoformat(), row_account_id)
-        if source == "manual_lock" or abs(current - float(row["old_price"])) > 0.005 or (
-                calendar and calendar.get("decision_log_id") not in (None, log_id)):
+        if (source == "manual_lock" or abs(current - float(row["old_price"])) > 0.005
+                or not calendar or calendar.get("decision_log_id") != log_id
+                or str(calendar.get("status") or "") != "pending_approval"):
             return {"approved": False, "applied": False, "status": "stale", "message": "Prezzo, lock o raccomandazione cambiati: ricalcolare."}
         if not demo_enabled():
             try:

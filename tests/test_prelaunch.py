@@ -241,17 +241,28 @@ class Beds24Tests(unittest.TestCase):
 
 
 class SchedulerHorizonTests(unittest.TestCase):
+    def test_default_timeout_scales_with_full_horizon_and_override_remains_explicit(self):
+        from pricepilot.core.scheduler import _cycle_timeout_seconds
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_cycle_timeout_seconds(1), 180.0)
+            self.assertEqual(_cycle_timeout_seconds(90), 600.0)
+            self.assertEqual(_cycle_timeout_seconds(366), 2256.0)
+        with patch.dict(os.environ, {'PRICEPILOT_CYCLE_TIMEOUT_SECONDS': '17'}):
+            self.assertEqual(_cycle_timeout_seconds(90), 17.0)
+
     def run_cycle(self, state='open', fail=False):
         from contextlib import ExitStack
         from pricepilot.core.scheduler import run_pricing_cycle
         from pricepilot.providers import registry
         from pricepilot.core import database
         self.days=[]
+        self.calls=[]
         provider=Mock(name='fixture_inventory')
         provider.name='test_inventory'
         provider.estimate.return_value=OccupancyResult(.5,'test',{'target_state':state})
         def decision(**kw):
             self.days.append(kw['target_date'])
+            self.calls.append(kw)
             if fail: raise DataUnavailable('No observation')
             return {'mode':'advisory'}
         with ExitStack() as stack:
@@ -263,8 +274,11 @@ class SchedulerHorizonTests(unittest.TestCase):
             return run_pricing_cycle(target_date=DAY,horizon_days=3)
 
     def test_every_future_day_is_analyzed(self):
-        self.run_cycle()
+        result = self.run_cycle()
         self.assertEqual(self.days,[DAY,DAY+timedelta(days=1),DAY+timedelta(days=2)])
+        self.assertEqual(result['run']['id'], 1)
+        self.assertTrue(all(call['_prevalidated_property']['id'] == 1 for call in self.calls))
+        self.assertTrue(all(call['_prevalidated_observation'] is not None for call in self.calls))
 
     def test_booked_dates_are_skipped(self):
         self.run_cycle('booked')
@@ -378,4 +392,52 @@ class ApprovalIntegrityTests(unittest.TestCase):
         self.db.mark_decision_rejected(self.log,self.account['id'])
         with patch('pricepilot.engine.decision_engine._channel_manager_update') as send:
             self.assertEqual(approve_decision(self.log,self.account['id'])['status'],'not_pending')
+        send.assert_not_called()
+
+    def test_pending_inventory_excludes_unchanged_and_superseded_rows(self):
+        pending = self.db.get_pending_approvals(
+            account_id=self.account['id'], property_id=self.prop['id'])
+        self.assertEqual([row['id'] for row in pending], [self.log])
+
+        unchanged = self.db.save_decision_log({
+            'account_id': self.account['id'], 'property_id': self.prop['id'],
+            'old_price': 100, 'new_price': 100, 'decision': 'UNCHANGED',
+            'mode': 'approval', 'applied': 0,
+            'date': (DAY + timedelta(days=1)).isoformat(),
+        })
+        self.db.upsert_calendar_price({
+            **self.calendar, 'date': (DAY + timedelta(days=1)).isoformat(),
+            'recommended_price': 100, 'decision_log_id': unchanged,
+            'status': 'unchanged',
+        })
+        superseding = self.db.save_decision_log({
+            'account_id': self.account['id'], 'property_id': self.prop['id'],
+            'old_price': 100, 'new_price': 115,
+            'decision': 'PENDING_APPROVAL: 100.00->115.00 (+15.0%)',
+            'mode': 'approval', 'applied': 0,
+            'date': DAY.isoformat(),
+        })
+        self.db.upsert_calendar_price({
+            **self.calendar, 'recommended_price': 115,
+            'decision_log_id': superseding, 'status': 'pending_approval',
+        })
+
+        pending = self.db.get_pending_approvals(
+            account_id=self.account['id'], property_id=self.prop['id'])
+        self.assertEqual([row['id'] for row in pending], [superseding])
+
+    def test_unchanged_decision_cannot_enter_writer(self):
+        unchanged = self.db.save_decision_log({
+            'account_id': self.account['id'], 'property_id': self.prop['id'],
+            'old_price': 100, 'new_price': 100, 'decision': 'UNCHANGED',
+            'mode': 'approval', 'applied': 0, 'date': DAY.isoformat(),
+        })
+        self.db.upsert_calendar_price({
+            **self.calendar, 'recommended_price': 100,
+            'decision_log_id': unchanged, 'status': 'unchanged',
+        })
+        from pricepilot.engine.decision_engine import approve_decision
+        with patch('pricepilot.engine.decision_engine._channel_manager_update') as send:
+            result = approve_decision(unchanged, self.account['id'])
+        self.assertEqual(result['status'], 'not_pending')
         send.assert_not_called()

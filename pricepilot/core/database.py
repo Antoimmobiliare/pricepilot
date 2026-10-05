@@ -1870,6 +1870,51 @@ def upsert_calendar_price(entry: Dict) -> Dict:
     return get_calendar_price(property_id, date_str, account_id) or {}
 
 
+def upsert_calendar_prices(entries: List[Dict]) -> List[Dict]:
+    """Upsert a validated calendar batch in one database transaction."""
+    if not entries:
+        return []
+    account_ids = {int(entry.get("account_id") or 1) for entry in entries}
+    property_ids = {int(entry["property_id"]) for entry in entries}
+    if len(account_ids) != 1 or len(property_ids) != 1:
+        raise ValueError("Il batch calendario deve appartenere a un solo account/appartamento.")
+    now = datetime.utcnow().isoformat()
+    values = []
+    for entry in entries:
+        values.append((
+            int(entry.get("account_id") or 1), int(entry["property_id"]), str(entry["date"]),
+            float(entry["current_price"]), entry.get("current_price_source", "manual"),
+            entry.get("recommended_price"), entry.get("status", "current"),
+            entry.get("decision_log_id"), entry.get("applied_price"), entry.get("notes", ""),
+            entry.get("created_at", now), now,
+        ))
+    with get_conn() as conn:
+        conn.executemany("""
+            INSERT INTO price_calendar
+                (account_id, property_id, date, current_price,
+                 current_price_source, recommended_price, status,
+                 decision_log_id, applied_price, notes, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(account_id, property_id, date)
+            DO UPDATE SET
+                current_price=excluded.current_price,
+                current_price_source=excluded.current_price_source,
+                recommended_price=excluded.recommended_price,
+                status=excluded.status,
+                decision_log_id=excluded.decision_log_id,
+                applied_price=excluded.applied_price,
+                notes=excluded.notes,
+                updated_at=excluded.updated_at
+        """, values)
+    first = entries[0]
+    dates = [str(entry["date"]) for entry in entries]
+    return get_price_calendar(
+        account_id=int(first.get("account_id") or 1),
+        property_id=int(first["property_id"]),
+        date_from=min(dates), date_to=max(dates), limit=len(entries),
+    )
+
+
 def get_current_price_for_date(prop: Dict, date_str: str) -> tuple[float, str]:
     """
     Determina il prezzo corrente usato dal motore.
@@ -2161,19 +2206,24 @@ def get_pending_approvals(
 ) -> List[Dict]:
     """Ritorna le decisioni in attesa di approvazione."""
     query = (
-        "SELECT * FROM decision_log "
-        "WHERE mode='approval' AND applied=0 AND COALESCE(data_source,'') <> 'test_sandbox' "
-        "AND decision NOT LIKE '%[APPROVED%' "
-        "AND decision NOT LIKE '%[REJECTED]%'"
+        "SELECT dl.* FROM decision_log dl "
+        "LEFT JOIN price_calendar pc ON pc.account_id=dl.account_id "
+        "AND pc.property_id=dl.property_id AND pc.date=dl.date "
+        "WHERE dl.mode='approval' AND dl.applied=0 "
+        "AND COALESCE(dl.data_source,'') <> 'test_sandbox' "
+        "AND dl.decision LIKE 'PENDING_APPROVAL%' "
+        "AND dl.decision NOT LIKE '%[APPROVED%' "
+        "AND dl.decision NOT LIKE '%[REJECTED]%' "
+        "AND (pc.date IS NULL OR (pc.decision_log_id=dl.id AND pc.status='pending_approval'))"
     )
     params: list = []
     if account_id is not None:
-        query += " AND account_id=?"
+        query += " AND dl.account_id=?"
         params.append(account_id)
     if property_id is not None:
-        query += " AND property_id=?"
+        query += " AND dl.property_id=?"
         params.append(property_id)
-    query += " ORDER BY timestamp DESC"
+    query += " ORDER BY dl.timestamp DESC"
     with get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
@@ -2361,7 +2411,7 @@ _CLOUD_PRIMARY_OPERATIONS = (
     "upsert_property", "get_properties", "get_property", "delete_property",
     "save_decision_log", "get_decision_log", "get_decision_log_entry", "update_decision_state", "claim_decision_application",
     "mark_decision_rejected", "save_occupancy", "get_occupancy_history", "save_market_history",
-    "get_market_history", "get_calendar_price", "get_price_calendar", "upsert_calendar_price",
+    "get_market_history", "get_calendar_price", "get_price_calendar", "upsert_calendar_price", "upsert_calendar_prices",
     "get_current_price_for_date", "save_price_recommendation", "update_calendar_status_for_decision",
     "save_telegram_link", "get_telegram_link_by_token", "get_telegram_link_by_property",
     "revoke_telegram_link", "get_all_telegram_links", "get_telegram_decision_context",

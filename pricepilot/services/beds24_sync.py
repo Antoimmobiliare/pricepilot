@@ -224,21 +224,35 @@ def sync_property(account_id, property_id, start, horizon_days=90, deadline=None
     finally:
         client.close()
     # Persist observed current rates using the existing repository, preserving locks.
-    from pricepilot.core.database import get_calendar_price, upsert_calendar_price
+    from pricepilot.core.database import get_price_calendar, upsert_calendar_prices
     from pricepilot.providers.observations import money
     # Validate the entire batch before the first database mutation.
     for row in rows:
         if row["current_price"] is not None:
             money(row["current_price"])
+    existing_rows = get_price_calendar(
+        account_id=account_id, property_id=property_id,
+        date_from=calendar_start.isoformat(),
+        date_to=(end - timedelta(days=1)).isoformat(),
+        limit=max(len(rows), 1),
+    )
+    existing_by_date = {str(item["date"]): item for item in existing_rows}
+    calendar_batch = []
     for row in rows:
-        if row["current_price"] is not None and money(row["current_price"]) > 0:
-            existing=get_calendar_price(property_id,row["date"],account_id)
-            if existing and existing.get("status")=="locked":
-                continue
-            upsert_calendar_price({**(existing or {}), "account_id":account_id,"property_id":property_id,"date":row["date"],
-                "current_price":row["current_price"],"current_price_source":"beds24_observation",
-                "status":(existing or {}).get("status") or "observed",
-                "notes":(existing or {}).get("notes") or "Tariffa calendario Beds24; propagazione OTA non verificata."})
+        if row["current_price"] is None or money(row["current_price"]) <= 0:
+            continue
+        existing = existing_by_date.get(row["date"])
+        if existing and existing.get("status") == "locked":
+            continue
+        calendar_batch.append({
+            **(existing or {}),
+            "account_id": account_id, "property_id": property_id, "date": row["date"],
+            "current_price": row["current_price"], "current_price_source": "beds24_observation",
+            "status": (existing or {}).get("status") or "observed",
+            "notes": (existing or {}).get("notes") or
+                "Tariffa calendario Beds24; propagazione OTA non verificata.",
+        })
+    upsert_calendar_prices(calendar_batch)
     save_snapshot(account_id,property_id,rows,reservations,calendar_start,end,observed_at)
     # Optional compatibility export only when explicitly requested. Database is
     # the canonical source for application, scheduler and authenticated API.

@@ -972,6 +972,37 @@ def upsert_calendar_price(entry: Dict) -> Dict:
     return _legacy_row(row) or {}
 
 
+def upsert_calendar_prices(entries: list[Dict]) -> list[Dict]:
+    """Persist one validated calendar batch with one PostgREST upsert."""
+    if not entries:
+        return []
+    payloads = [{
+        "account_id": int(entry.get("account_id") or 1),
+        "property_local_id": int(entry["property_id"]),
+        "date": entry["date"],
+        "current_price": float(entry["current_price"]),
+        "current_price_source": entry.get("current_price_source", "manual"),
+        "recommended_price": entry.get("recommended_price"),
+        "status": entry.get("status", "current"),
+        "decision_log_local_id": entry.get("decision_log_id"),
+        "applied_price": entry.get("applied_price"),
+        "notes": entry.get("notes", ""),
+    } for entry in entries]
+    account_ids = {row["account_id"] for row in payloads}
+    property_ids = {row["property_local_id"] for row in payloads}
+    if len(account_ids) != 1 or len(property_ids) != 1:
+        raise ValueError("Il batch calendario deve appartenere a un solo account/appartamento.")
+    payloads = [_scoped_payload("price_calendar", row) for row in payloads]
+    rows = _data(_client().table("price_calendar").upsert(
+        payloads, on_conflict="account_id,property_local_id,date"
+    ).execute())
+    if len(rows) != len(payloads):
+        raise CloudDatabaseUnavailable(
+            "Supabase non ha confermato tutte le righe del batch calendario."
+        )
+    return _legacy_rows(rows)
+
+
 def get_current_price_for_date(prop: Dict, date_str: str) -> tuple[float, str]:
     row = get_calendar_price(int(prop.get("id") or 1), date_str, int(prop.get("account_id") or 1))
     if row and row.get("current_price") is not None:
@@ -1120,8 +1151,33 @@ def get_pending_approvals(
     account_id: Optional[int] = None,
 ) -> list[Dict]:
     rows = get_decision_log(limit=500, property_id=property_id, account_id=account_id)
-    return [row for row in rows if row.get("data_source") != "test_sandbox" and str(row.get("mode")) == "approval" and not int(row.get("applied") or 0)
-            and "[REJECTED]" not in str(row.get("decision") or "") and "[APPROVED" not in str(row.get("decision") or "")]
+    calendar_rows = get_price_calendar(
+        account_id=account_id, property_id=property_id, limit=5000,
+    )
+    calendar_by_date = {
+        (int(item.get("account_id") or 0), int(item.get("property_id") or 0), str(item.get("date") or "")): item
+        for item in calendar_rows
+    }
+    pending = []
+    for row in rows:
+        decision = str(row.get("decision") or "")
+        if (row.get("data_source") == "test_sandbox"
+                or str(row.get("mode")) != "approval"
+                or int(row.get("applied") or 0)
+                or not decision.startswith("PENDING_APPROVAL")
+                or "[REJECTED]" in decision or "[APPROVED" in decision):
+            continue
+        calendar = calendar_by_date.get((
+            int(row.get("account_id") or 0), int(row.get("property_id") or 0),
+            str(row.get("date") or ""),
+        ))
+        # Historical decisions created before calendar rows existed remain
+        # visible. Once a date has a calendar row, that row is authoritative.
+        if calendar is None or (
+                int(calendar.get("decision_log_id") or 0) == int(row.get("id") or 0)
+                and str(calendar.get("status") or "") == "pending_approval"):
+            pending.append(row)
+    return pending
 
 
 def get_property_integrations(property_id: int) -> list[Dict]:

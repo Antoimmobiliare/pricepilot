@@ -179,6 +179,9 @@ class ObservedInventoryProvider:
         if not available:
             raise DataUnavailable("Nessuna notte vendibile nella finestra: occupancy non definita.")
         return OccupancyResult(occupancy=booked / available, source=self.name,
-            raw={"target_state": selected[target_date]["state"], "available_nights": available,
+            raw={"account_id": account_id, "property_id": property_id,
+                 "target_date": target_date.isoformat(),
+                 "observed_at": selected[target_date].get("observed_at"),
+                 "target_state": selected[target_date]["state"], "available_nights": available,
                  "booked_nights": booked, "window_start": target_date.isoformat(),
                  "window_end_exclusive": window_end.isoformat(), "metric_version": "pmos.metrics.v1"})

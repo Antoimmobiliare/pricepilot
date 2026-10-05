@@ -634,6 +634,49 @@ class CalendarWorkflowTests(unittest.TestCase):
 
 
 class TelegramCalendarWorkflowTests(unittest.TestCase):
+    def test_unchanged_decision_is_not_delivered_as_an_approval(self):
+        from pricepilot.services import telegram_bot
+        row = {'id': 53, 'account_id': 11, 'property_id': 11,
+               'decision': 'UNCHANGED', 'applied': 0,
+               'data_source': 'beds24_observation', 'date': '2026-10-05'}
+        with patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
+             patch.object(telegram_bot, 'send_approval_request') as send:
+            result = telegram_bot.send_existing_pending_approval(53, 11)
+        self.assertEqual(result, {'ok': False, 'error': 'decision_not_pending'})
+        send.assert_not_called()
+
+    def test_review_next_ignores_unchanged_and_non_authoritative_pending_rows(self):
+        from pricepilot.services import telegram_bot
+        from datetime import datetime, timezone
+        stamp = datetime.now(timezone.utc).isoformat()
+        current = {'id': 52, 'account_id': 11, 'property_id': 11,
+                   'decision': 'PENDING_APPROVAL: 89.00->93.45 (+5.0%)',
+                   'timestamp': stamp, 'date': '2026-10-05',
+                   'old_price': 89.0, 'new_price': 93.45}
+        unchanged = {**current, 'id': 53, 'date': '2026-10-06',
+                     'decision': 'UNCHANGED'}
+        superseded = {**current, 'id': 54, 'date': '2026-10-07'}
+
+        def calendar(_property_id, target_date, _account_id):
+            if target_date == current['date']:
+                return {'decision_log_id': 52, 'status': 'pending_approval'}
+            if target_date == superseded['date']:
+                return {'decision_log_id': 55, 'status': 'pending_approval'}
+            return {'decision_log_id': 53, 'status': 'unchanged'}
+
+        with patch.object(telegram_bot, '_decision_context_for_chat', return_value={
+                'account_id': 11, 'property_id': 11}), \
+             patch('pricepilot.core.database.get_decision_log_entry', return_value=current), \
+             patch('pricepilot.core.database.get_decision_log', return_value=[
+                 current, unchanged, superseded]), \
+             patch('pricepilot.core.database.get_calendar_price', side_effect=calendar), \
+             patch('pricepilot.engine.decision_engine._scoped_property', return_value={
+                 'id': 11, 'account_id': 11, 'name': 'Luma Pisa'}), \
+             patch.object(telegram_bot, 'send_approval_request', return_value={
+                 'ok': True, 'result': {'message_id': 9}}) as send:
+            self.assertTrue(telegram_bot._review_pending(52, 44))
+        self.assertIsNone(send.call_args.args[10])
+
     def test_existing_pending_approval_is_delivered_once_and_returns_message_id(self):
         from pricepilot.services import telegram_bot
         row = {'id': 52, 'account_id': 11, 'property_id': 11,
@@ -644,6 +687,8 @@ class TelegramCalendarWorkflowTests(unittest.TestCase):
                'factors': json.dumps({'lead_time_band': 'URGENT',
                                       'hours_until_checkin': 19.5})}
         with patch('pricepilot.core.database.get_decision_log_entry', return_value=row), \
+             patch('pricepilot.core.database.get_calendar_price', return_value={
+                 'decision_log_id': 52, 'status': 'pending_approval'}), \
              patch('pricepilot.core.database.get_property', return_value={'id': 11, 'account_id': 11, 'name': 'Luma Pisa'}), \
              patch('pricepilot.core.database.get_telegram_link_by_property', return_value={'chat_id': 44}), \
              patch('pricepilot.core.database.get_notification_preferences', return_value={'telegram_enabled': 1, 'approval_alerts': 1}), \

@@ -97,6 +97,29 @@ class OperationalStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.save_connection(self.account,self.pid,{**self.mapping,'token_env':'SECRET_VALUE'})
 
+    def test_cycle_read_cache_reuses_scoped_document_and_returns_copies(self):
+        store.save_connection(self.account, self.pid, self.mapping)
+        original_get_conn = db.get_conn
+        calls = []
+
+        def counted_get_conn():
+            calls.append(1)
+            return original_get_conn()
+
+        with patch.object(db, 'get_conn', side_effect=counted_get_conn):
+            with store.operational_read_cache():
+                first = store.get_connection(self.account, self.pid)
+                first['room_id'] = 999
+                second = store.get_connection(self.account, self.pid)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(second['room_id'], 20)
+
+        # A new cycle must read fresh state rather than retaining old cache.
+        with patch.object(db, 'get_conn', side_effect=counted_get_conn):
+            with store.operational_read_cache():
+                self.assertEqual(store.get_connection(self.account, self.pid)['room_id'], 20)
+        self.assertEqual(len(calls), 4)
+
     def test_cross_account_read_and_write_rejected(self):
         for fn,args in [(store.get_connection,()),(store.save_connection,(self.mapping,))]:
             with self.assertRaises(ValueError):

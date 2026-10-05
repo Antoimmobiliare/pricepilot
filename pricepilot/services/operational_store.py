@@ -4,6 +4,9 @@ SQLite schema is additive. Cloud uses the versioned operational_store.sql
 migration and fails closed if unavailable; never falls back to local files.
 One snapshot contains inventory and bookings, so their publication is atomic.
 """
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import json
@@ -13,9 +16,31 @@ from pricepilot.core import database as db
 from pricepilot.core.data_backend import is_supabase_primary, CloudDatabaseUnavailable
 
 
+_CYCLE_READ_CACHE = ContextVar("pricepilot_operational_read_cache", default=None)
+
+
+@contextmanager
+def operational_read_cache():
+    """Reuse one immutable operational snapshot during a pricing cycle.
+
+    The cache is context-local, so concurrent accounts/requests cannot share
+    documents. Writes refresh the matching entry and the cache is discarded at
+    the end of the context.
+    """
+    token = _CYCLE_READ_CACHE.set({})
+    try:
+        yield
+    finally:
+        _CYCLE_READ_CACHE.reset(token)
+
+
 def _scope(account_id, property_id):
     if type(account_id) is not int or type(property_id) is not int or min(account_id, property_id) < 1:
         raise ValueError('Account e appartamento non validi.')
+    cache = _CYCLE_READ_CACHE.get()
+    scope_key = ("scope", account_id, property_id)
+    if cache is not None and cache.get(scope_key) is True:
+        return
     if is_supabase_primary():
         from pricepilot.services.supabase_primary import _client
         try:
@@ -28,6 +53,8 @@ def _scope(account_id, property_id):
             ) from None
         if not isinstance(rows, list) or len(rows) != 1:
             raise ValueError('Appartamento non appartenente all’account.')
+        if cache is not None:
+            cache[scope_key] = True
         return
     with db.get_conn() as conn:
         row = conn.execute(
@@ -36,6 +63,8 @@ def _scope(account_id, property_id):
         ).fetchone()
     if row is None:
         raise ValueError('Appartamento non appartenente all’account.')
+    if cache is not None:
+        cache[scope_key] = True
 
 
 def _table(conn):
@@ -58,6 +87,10 @@ def _table(conn):
 
 def _get(account_id, property_id, kind):
     _scope(account_id, property_id)
+    cache = _CYCLE_READ_CACHE.get()
+    cache_key = ("document", account_id, property_id, kind)
+    if cache is not None and cache_key in cache:
+        return deepcopy(cache[cache_key])
     if is_supabase_primary():
         from pricepilot.services.supabase_primary import _client
         try:
@@ -73,6 +106,8 @@ def _get(account_id, property_id, kind):
                 raise ValueError()
             if payload is not None and (payload.get('account_id'), payload.get('property_id')) != (account_id, property_id):
                 raise ValueError()
+            if cache is not None:
+                cache[cache_key] = deepcopy(payload)
             return payload
         except Exception:
             raise CloudDatabaseUnavailable('Archivio operativo cloud non disponibile: applicare operational_store.sql e verificare la connessione.') from None
@@ -82,6 +117,8 @@ def _get(account_id, property_id, kind):
         payload = json.loads(row[0]) if row else None
         if payload is not None and (payload.get('account_id'), payload.get('property_id')) != (account_id, property_id):
             raise ValueError('Documento operativo fuori account/appartamento.')
+        if cache is not None:
+            cache[cache_key] = deepcopy(payload)
         return payload
 
 
@@ -116,6 +153,10 @@ def _save(account_id, property_id, kind, payload):
                 ON CONFLICT(account_id,property_id,kind) DO UPDATE SET
                 payload=excluded.payload,updated_at=excluded.updated_at''',
                 (account_id, property_id, kind, encoded, row['updated_at']))
+    cache = _CYCLE_READ_CACHE.get()
+    if cache is not None:
+        cache[("scope", account_id, property_id)] = True
+        cache[("document", account_id, property_id, kind)] = deepcopy(row['payload'])
     return row['payload']
 
 
