@@ -304,6 +304,15 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_telegram_approvals_decision
             ON telegram_approvals(decision_log_id);
 
+        CREATE TABLE IF NOT EXISTS telegram_update_cursor (
+            consumer_key       TEXT PRIMARY KEY,
+            next_update_id     INTEGER NOT NULL DEFAULT 0,
+            last_update_id     INTEGER,
+            last_status        TEXT NOT NULL DEFAULT 'ready',
+            last_error         TEXT NOT NULL DEFAULT '',
+            updated_at         TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS property_integrations (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             property_id INTEGER NOT NULL,
@@ -474,6 +483,16 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_telegram_approvals_decision "
             "ON telegram_approvals(decision_log_id)"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS telegram_update_cursor (
+                consumer_key       TEXT PRIMARY KEY,
+                next_update_id     INTEGER NOT NULL DEFAULT 0,
+                last_update_id     INTEGER,
+                last_status        TEXT NOT NULL DEFAULT 'ready',
+                last_error         TEXT NOT NULL DEFAULT '',
+                updated_at         TEXT NOT NULL
+            )
+        """)
 
         # --- properties ---
         cols_p = {r[1] for r in conn.execute("PRAGMA table_info(properties)").fetchall()}
@@ -2144,6 +2163,74 @@ def get_telegram_approvals(
     return [dict(r) for r in rows]
 
 
+def get_telegram_update_cursor(consumer_key: str) -> Dict:
+    """Return the durable next Telegram update id for one poller consumer."""
+    key = str(consumer_key or "").strip()
+    if not key:
+        raise ValueError("consumer_key Telegram obbligatoria")
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO telegram_update_cursor
+               (consumer_key, next_update_id, last_status, last_error, updated_at)
+               VALUES (?, 0, 'ready', '', ?)""",
+            (key, now),
+        )
+        row = conn.execute(
+            "SELECT * FROM telegram_update_cursor WHERE consumer_key=?",
+            (key,),
+        ).fetchone()
+    if not row:
+        raise RuntimeError("Cursor Telegram non disponibile")
+    return dict(row)
+
+
+def advance_telegram_update_cursor(
+    consumer_key: str,
+    *,
+    expected_next_update_id: int,
+    next_update_id: int,
+    last_update_id: int,
+    status: str,
+    error: str = "",
+) -> bool:
+    """Compare-and-swap cursor advancement after one terminal update result."""
+    expected = int(expected_next_update_id)
+    next_id = int(next_update_id)
+    update_id = int(last_update_id)
+    if next_id != update_id + 1 or next_id <= expected:
+        raise ValueError("Avanzamento cursor Telegram non valido")
+    with get_conn() as conn:
+        changed = conn.execute(
+            """UPDATE telegram_update_cursor
+                  SET next_update_id=?, last_update_id=?, last_status=?,
+                      last_error=?, updated_at=?
+                WHERE consumer_key=? AND next_update_id=?""",
+            (next_id, update_id, str(status), str(error)[:500], datetime.utcnow().isoformat(),
+             str(consumer_key), expected),
+        ).rowcount
+    return changed == 1
+
+
+def mark_telegram_update_failure(
+    consumer_key: str,
+    *,
+    expected_next_update_id: int,
+    update_id: int,
+    error: str,
+) -> bool:
+    """Persist a sanitized failure without consuming the Telegram update."""
+    with get_conn() as conn:
+        changed = conn.execute(
+            """UPDATE telegram_update_cursor
+                  SET last_update_id=?, last_status='error', last_error=?, updated_at=?
+                WHERE consumer_key=? AND next_update_id=?""",
+            (int(update_id), str(error)[:500], datetime.utcnow().isoformat(),
+             str(consumer_key), int(expected_next_update_id)),
+        ).rowcount
+    return changed == 1
+
+
 def get_property_integrations(property_id: int) -> List[Dict]:
     """Ritorna tutte le integrazioni OTA per una proprietà."""
     with get_conn() as conn:
@@ -2416,6 +2503,7 @@ _CLOUD_PRIMARY_OPERATIONS = (
     "save_telegram_link", "get_telegram_link_by_token", "get_telegram_link_by_property",
     "revoke_telegram_link", "get_all_telegram_links", "get_telegram_decision_context",
     "record_telegram_approval", "get_telegram_approvals", "get_pending_approvals",
+    "get_telegram_update_cursor", "advance_telegram_update_cursor", "mark_telegram_update_failure",
     "get_property_integrations", "upsert_property_integration", "delete_property_integration",
     "update_decision_tg_message", "record_price_update", "get_price_updates",
     "save_decision", "get_decisions", "save_competitors", "get_competitors", "upsert_event",

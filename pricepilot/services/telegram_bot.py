@@ -1081,7 +1081,7 @@ def _handle_callback(
         answer_callback_query(callback_query_id, "Azione non riconosciuta.")
 
 
-def process_webhook(update: Dict) -> None:
+def process_telegram_update(update: Dict) -> None:
     """
     Punto di ingresso per gli aggiornamenti Telegram (webhook o polling).
     Gestisce messaggi /start e callback_query dai pulsanti inline.
@@ -1152,6 +1152,11 @@ def process_webhook(update: Dict) -> None:
         # maps this exception to HTTP 500 and monitoring/Telegram can observe
         # the failed delivery; idempotency remains enforced by the handler.
         raise
+
+
+def process_webhook(update: Dict) -> None:
+    """Backward-compatible HTTP entry point using the shared update handler."""
+    process_telegram_update(update)
 
 
 # ─── Polling (sviluppo locale) ────────────────────────────────────────────────

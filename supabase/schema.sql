@@ -243,6 +243,19 @@ create table if not exists public.telegram_approvals (
     unique(account_id, local_id)
 );
 
+-- Cursor server-only per il poller Telegram stateless (GitHub Actions).
+create table if not exists public.telegram_update_cursor (
+    consumer_key text primary key,
+    next_update_id bigint not null default 0 check (next_update_id >= 0),
+    last_update_id bigint,
+    last_status text not null default 'ready',
+    last_error text not null default '',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+revoke all on table public.telegram_update_cursor from anon, authenticated;
+grant select, insert, update on table public.telegram_update_cursor to service_role;
+
 create table if not exists public.property_integrations (
     id uuid primary key default gen_random_uuid(),
     account_id bigint not null,
@@ -698,6 +711,11 @@ create trigger set_telegram_approvals_updated_at
 before update on public.telegram_approvals
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_telegram_update_cursor_updated_at on public.telegram_update_cursor;
+create trigger set_telegram_update_cursor_updated_at
+before update on public.telegram_update_cursor
+for each row execute function public.set_updated_at();
+
 drop trigger if exists set_property_integrations_updated_at on public.property_integrations;
 create trigger set_property_integrations_updated_at
 before update on public.property_integrations
@@ -800,6 +818,7 @@ alter table public.occupancy_history enable row level security;
 alter table public.market_history enable row level security;
 alter table public.telegram_links enable row level security;
 alter table public.telegram_approvals enable row level security;
+alter table public.telegram_update_cursor enable row level security;
 alter table public.property_integrations enable row level security;
 alter table public.operation_runs enable row level security;
 alter table public.audit_events enable row level security;

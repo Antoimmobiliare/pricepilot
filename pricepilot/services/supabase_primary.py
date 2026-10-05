@@ -1146,6 +1146,101 @@ def get_telegram_approvals(limit: int = 100, account_id: Optional[int] = None, p
     return _legacy_rows(_select("telegram_approvals", filters=filters, order=("timestamp", True), limit=limit))
 
 
+def get_telegram_update_cursor(consumer_key: str) -> Dict:
+    """Return/create the server-only durable cursor used by stateless pollers."""
+    key = str(consumer_key or "").strip()
+    if not key:
+        raise ValueError("consumer_key Telegram obbligatoria")
+    client = _session_client()
+    rows = _data(
+        client.table("telegram_update_cursor")
+        .select("consumer_key,next_update_id,last_update_id,last_status,last_error,updated_at")
+        .eq("consumer_key", key)
+        .limit(1)
+        .execute()
+    )
+    if not rows:
+        rows = _data(
+            client.table("telegram_update_cursor")
+            .upsert(
+                {
+                    "consumer_key": key,
+                    "next_update_id": 0,
+                    "last_status": "ready",
+                    "last_error": "",
+                },
+                on_conflict="consumer_key",
+                ignore_duplicates=True,
+            )
+            .execute()
+        )
+        if not rows:
+            rows = _data(
+                client.table("telegram_update_cursor")
+                .select("consumer_key,next_update_id,last_update_id,last_status,last_error,updated_at")
+                .eq("consumer_key", key)
+                .limit(1)
+                .execute()
+            )
+    if not rows:
+        raise CloudDatabaseUnavailable("Cursor Telegram cloud non disponibile.")
+    return dict(rows[0])
+
+
+def advance_telegram_update_cursor(
+    consumer_key: str,
+    *,
+    expected_next_update_id: int,
+    next_update_id: int,
+    last_update_id: int,
+    status: str,
+    error: str = "",
+) -> bool:
+    """CAS advancement; a concurrent/duplicate worker cannot skip an update."""
+    expected = int(expected_next_update_id)
+    next_id = int(next_update_id)
+    update_id = int(last_update_id)
+    if next_id != update_id + 1 or next_id <= expected:
+        raise ValueError("Avanzamento cursor Telegram non valido")
+    rows = _data(
+        _session_client().table("telegram_update_cursor")
+        .update({
+            "next_update_id": next_id,
+            "last_update_id": update_id,
+            "last_status": str(status),
+            "last_error": str(error)[:500],
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+        .eq("consumer_key", str(consumer_key))
+        .eq("next_update_id", expected)
+        .execute()
+    )
+    return len(rows) == 1
+
+
+def mark_telegram_update_failure(
+    consumer_key: str,
+    *,
+    expected_next_update_id: int,
+    update_id: int,
+    error: str,
+) -> bool:
+    """Persist failure diagnostics while leaving next_update_id unchanged."""
+    rows = _data(
+        _session_client().table("telegram_update_cursor")
+        .update({
+            "last_update_id": int(update_id),
+            "last_status": "error",
+            "last_error": str(error)[:500],
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+        .eq("consumer_key", str(consumer_key))
+        .eq("next_update_id", int(expected_next_update_id))
+        .execute()
+    )
+    return len(rows) == 1
+
+
 def get_pending_approvals(
     property_id: Optional[int] = None,
     account_id: Optional[int] = None,
