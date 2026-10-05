@@ -774,6 +774,102 @@ def _decision_context_for_chat(log_id: int, chat_id: int) -> Optional[Dict]:
     return get_telegram_decision_context(log_id, chat_id)
 
 
+def _callback_decision_id(data: str) -> Optional[int]:
+    """Estrae un id decisione senza mai autorizzare il callback.
+
+    Questa funzione serve soltanto per collegare il callback alla traccia di
+    audit. L'autorizzazione resta vincolata a ``_decision_context_for_chat``
+    nel normale handler operativo.
+    """
+    if not isinstance(data, str):
+        return None
+    for prefix in ("approve_", "reject_", "test_approve_", "test_reject_", "review_"):
+        if data.startswith(prefix):
+            raw = data[len(prefix):]
+            if prefix.startswith("test_"):
+                raw = raw.split("_", 1)[-1]
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _callback_scope_for_audit(log_id: Optional[int], chat_id: Optional[int]) -> Dict[str, Any]:
+    """Ritorna account/property per audit senza concedere accesso operativo."""
+    if log_id is None:
+        return {}
+    try:
+        if chat_id is not None:
+            context = _decision_context_for_chat(log_id, chat_id)
+            if context:
+                return context
+        from pricepilot.core.database import get_decision_log_entry
+        row = get_decision_log_entry(log_id)
+        if row:
+            return {
+                "account_id": row.get("account_id"),
+                "property_id": row.get("property_id"),
+            }
+    except Exception as exc:
+        logger.warning("Scope callback non disponibile per audit: %s", type(exc).__name__)
+    return {}
+
+
+def _sanitize_callback_error(exc: Exception) -> str:
+    """Riduce gli errori persistiti evitando token e payload sensibili."""
+    message = str(exc or "")
+    token = get_bot_token()
+    if token:
+        message = message.replace(token, "[REDACTED]")
+    return f"{type(exc).__name__}: {message[:500]}"
+
+
+def _record_callback_audit(
+    *,
+    callback_query_id: str,
+    message_id: Optional[int],
+    callback_data: str,
+    decision_log_id: Optional[int],
+    chat_id: Optional[int],
+    status: str,
+    error: str = "",
+) -> None:
+    """Persist callback receipt/failure before operational processing.
+
+    Audit failures are logged but never converted into a successful callback:
+    the caller still re-raises processing failures and the endpoint returns a
+    non-2xx response, allowing Telegram/monitoring to observe the failure.
+    """
+    scope = _callback_scope_for_audit(decision_log_id, chat_id)
+    details = {
+        "callback_query_id": str(callback_query_id or ""),
+        "message_id": str(message_id or ""),
+        "callback_data": str(callback_data or "")[:200],
+        "decision_log_id": decision_log_id,
+        "processing_state": status,
+    }
+    if error:
+        details["error"] = error
+    try:
+        from pricepilot.core.database import record_audit_event
+        record_audit_event(
+            action="telegram_callback_received" if status == "received" else "telegram_callback_error",
+            entity_type="telegram_callback",
+            entity_id=str(callback_query_id or ""),
+            account_id=int(scope.get("account_id") or 1),
+            property_id=scope.get("property_id"),
+            source="telegram",
+            status=status,
+            details=details,
+        )
+    except Exception as audit_exc:
+        logger.error(
+            "Audit callback Telegram non salvato (%s): %s",
+            status, type(audit_exc).__name__, exc_info=True,
+        )
+
+
 def _record_approval_event(
     *,
     context: Dict,
@@ -990,6 +1086,7 @@ def process_webhook(update: Dict) -> None:
     Punto di ingresso per gli aggiornamenti Telegram (webhook o polling).
     Gestisce messaggi /start e callback_query dai pulsanti inline.
     """
+    callback_meta: Optional[Dict[str, Any]] = None
     try:
         # ── Messaggi di testo ─────────────────────────────────────────────────
         if "message" in update:
@@ -1020,10 +1117,41 @@ def process_webhook(update: Dict) -> None:
             cq_id      = cq["id"]
             orig_text  = cq["message"].get("text", "")
 
+            callback_meta = {
+                "callback_query_id": str(cq_id),
+                "message_id": message_id,
+                "callback_data": data,
+                "decision_log_id": _callback_decision_id(data),
+                "chat_id": chat_id,
+            }
+            # Persist the receipt before any approval/rejection operation.  A
+            # later exception is recorded separately and is re-raised below.
+            _record_callback_audit(status="received", **callback_meta)
+
             _handle_callback(cq_id, data, chat_id, message_id, orig_text)
 
     except Exception as exc:
-        logger.error(f"Errore process_webhook: {exc}", exc_info=True)
+        if callback_meta:
+            safe_error = _sanitize_callback_error(exc)
+            _record_callback_audit(status="error", error=safe_error, **callback_meta)
+            try:
+                # Telegram buttons otherwise spin indefinitely while the
+                # callback is retried.  This acknowledgement does not mutate
+                # PricePilot/Beds24 and is best-effort only.
+                answer_callback_query(
+                    callback_meta["callback_query_id"],
+                    "PricePilot: errore interno, nessuna modifica applicata.",
+                )
+            except Exception as answer_exc:
+                logger.error(
+                    "Risposta errore callback Telegram non inviata: %s",
+                    type(answer_exc).__name__, exc_info=True,
+                )
+        logger.error("Errore process_webhook: %s", _sanitize_callback_error(exc), exc_info=True)
+        # Do not turn an operational failure into HTTP 200.  The API endpoint
+        # maps this exception to HTTP 500 and monitoring/Telegram can observe
+        # the failed delivery; idempotency remains enforced by the handler.
+        raise
 
 
 # ─── Polling (sviluppo locale) ────────────────────────────────────────────────
