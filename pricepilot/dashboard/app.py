@@ -4254,6 +4254,22 @@ def _decision_flow_status(decision: dict) -> tuple[str, str, str, str, str]:
     mode = str(decision.get("mode") or "").lower()
     applied = int(decision.get("applied") or 0)
 
+    # A decision with no price delta is an informational calendar result, not
+    # an approval request.  Keep it visible in the general history, but never
+    # classify it as pending merely because its mode is ``approval``.
+    try:
+        unchanged = abs(float(decision.get("old_price") or 0) - float(decision.get("new_price") or 0)) <= 0.005
+    except (TypeError, ValueError):
+        unchanged = False
+    if text.upper().startswith("UNCHANGED") or unchanged:
+        return (
+            "suggested",
+            "Prezzo invariato",
+            "Nessuna variazione di prezzo: non richiede approvazione.",
+            "#475569",
+            "#f8fafc",
+        )
+
     if "REJECTED" in haystack:
         return (
             "rejected",
@@ -4277,6 +4293,14 @@ def _decision_flow_status(decision: dict) -> tuple[str, str, str, str, str]:
             "Approvata dall'utente: resterà qui finché non colleghiamo channel manager/API.",
             "#92400e",
             "#fffbeb",
+        )
+    if any(marker in haystack for marker in ("STALE", "EXPIRED", "SYNC_FAILED", "APPLYING")):
+        return (
+            "suggested",
+            "Non approvabile",
+            "Decisione terminale o non più valida: non richiede approvazione.",
+            "#475569",
+            "#f8fafc",
         )
     if "AUTO_RECOMMENDED" in haystack or mode == "auto":
         return (
@@ -4314,6 +4338,17 @@ def _decision_prop_name(decision: dict, prop_map: dict[int, str]) -> str:
         return prop_map.get(int(decision.get("property_id") or 0), "Proprietà")
     except Exception:
         return "Proprietà"
+
+
+def _authoritative_pending_ids(account_id: int) -> set[int]:
+    """Return only decisions accepted by the shared approval predicate."""
+    try:
+        return {
+            int(row.get("id")) for row in _cached_pending_approvals(account_id)
+            if row.get("id") is not None
+        }
+    except Exception:
+        return set()
 
 
 def _approval_feedback(result: dict | None) -> tuple[str, str]:
@@ -4514,6 +4549,10 @@ def _tab_decisions_v2(cfg: dict):
         n_rows = st.slider("Decisioni da caricare", 10, 200, 60, key="decision_flow_limit")
 
     if raw_log:
+        # Use the same authoritative repository predicate as Telegram and
+        # approval processing.  The UI must not invent a broader definition of
+        # "pending" from mode/applied alone.
+        authoritative_pending_ids = _authoritative_pending_ids(account_id)
         filtered = []
         for item in raw_log[:n_rows]:
             pname = _decision_prop_name(item, prop_map)
@@ -4528,7 +4567,12 @@ def _tab_decisions_v2(cfg: dict):
             "rejected": [],
         }
         for item in filtered:
-            key = _decision_flow_status(item)[0]
+            item_id = item.get("id")
+            try:
+                item_id = int(item_id) if item_id is not None else None
+            except (TypeError, ValueError):
+                item_id = None
+            key = "pending" if item_id in authoritative_pending_ids else _decision_flow_status(item)[0]
             buckets.setdefault(key, []).append(item)
 
         m1, m2, m3, m4, m5 = st.columns(5)
