@@ -32,6 +32,7 @@ jobs:
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       BEDS24_LUMA_TOKEN: ${{ secrets.BEDS24_LUMA_TOKEN }}
+      BEDS24_LUMA_REFRESH_TOKEN: ${{ secrets.BEDS24_LUMA_REFRESH_TOKEN }}
 
     steps:
       - name: Checkout
@@ -55,7 +56,10 @@ jobs:
           : "${SUPABASE_URL:?Missing repository secret SUPABASE_URL}"
           : "${SUPABASE_ANON_KEY:?Missing repository secret SUPABASE_ANON_KEY}"
           : "${SUPABASE_SERVICE_ROLE_KEY:?Missing repository secret SUPABASE_SERVICE_ROLE_KEY}"
-          : "${BEDS24_LUMA_TOKEN:?Missing repository secret BEDS24_LUMA_TOKEN}"
+          if [[ -z "${BEDS24_LUMA_TOKEN:-}" && -z "${BEDS24_LUMA_REFRESH_TOKEN:-}" ]]; then
+            echo "Missing Beds24 credential secret (token or refresh token)" >&2
+            exit 1
+          fi
 
       - name: Process one bounded Telegram batch
         run: python -m pricepilot.services.telegram_poller --batch-limit 50

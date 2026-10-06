@@ -243,6 +243,23 @@ class Beds24Tests(unittest.TestCase):
         self.assertEqual(seen[0][1], 'TEST-NOT-A-REAL-TOKEN')
         self.assertEqual(seen[1][1], seen[0][1])
 
+    def test_refresh_token_takes_precedence_over_read_only_token(self):
+        seen = []
+        def handle(req):
+            seen.append((req.method, req.headers.get('token'), req.headers.get('refreshToken')))
+            if req.url.path.endswith('/authentication/token'):
+                return httpx.Response(200, json={'token': 'WRITE-CAPABLE', 'expiresIn': 86400})
+            if req.method == 'POST':
+                self.current = json.loads(req.content)[0]['calendar'][0]['price1']
+                return httpx.Response(201, json=[{'success': True}])
+            return httpx.Response(200, json=self.response())
+        client = Beds24Client(token='READ-ONLY', refresh_token='REFRESH', transport=httpx.MockTransport(handle))
+        self.addCleanup(client.close)
+        client.set_price(self.mapping, DAY, 110)
+        self.assertEqual(seen[0], ('GET', None, 'REFRESH'))
+        self.assertEqual(seen[1][1], 'WRITE-CAPABLE')
+        self.assertEqual(seen[2][1], 'WRITE-CAPABLE')
+
     def test_writer_401_is_failed_and_does_not_report_applied(self):
         mapping = {**self.mapping, 'account_id': 1, 'property_id': 2,
                    'provider': 'beds24', 'enabled': True, 'currency': 'EUR',

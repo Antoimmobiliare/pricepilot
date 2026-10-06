@@ -69,9 +69,11 @@ def load_mapping(account_id, property_id):
 
 class Beds24Client:
     def __init__(self, *, token="", refresh_token="", transport=None):
-        self._token = token
+        # A refresh token is the write-capable credential. When both values
+        # are configured, never prefer a potentially read-only long-life token.
+        self._token = "" if refresh_token else token
         self._refresh = refresh_token
-        self._expires = 0 if not token else float("inf")
+        self._expires = 0 if refresh_token or not token else float("inf")
         self._http = httpx.Client(base_url=BASE_URL, timeout=20, follow_redirects=False,
                                   trust_env=False, transport=transport)
 
@@ -338,8 +340,9 @@ class Beds24ChannelProvider:
         client = None
         try:
             m = load_mapping(int(prop["account_id"]), int(prop["id"]))
+            refresh_token = os.getenv(m.get("refresh_token_env", ""), "")
             client = Beds24Client(token=os.getenv(m.get("token_env", ""), ""),
-                                  refresh_token=os.getenv(m.get("refresh_token_env", ""), ""))
+                                  refresh_token=refresh_token)
             result = client.set_price(m, target_date, new_price)
             return ChannelUpdateResult(ok=True, platform=self.name, listing_id=str(m["room_id"]), is_real=True, raw=result)
         except Beds24Error as exc:
