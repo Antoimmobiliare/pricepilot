@@ -1,0 +1,30 @@
+name: PricePilot Beds24 read-only check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  beds24-readonly-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BEDS24_LUMA_REFRESH_TOKEN: ${{ secrets.BEDS24_LUMA_REFRESH_TOKEN }}
+      PRICEPILOT_ALLOW_CHANNEL_WRITES: '0'
+      PRICEPILOT_SCHEDULER_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependency
+        run: python -m pip install httpx
+      - name: Validate refresh token secret without exposing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BEDS24_LUMA_REFRESH_TOKEN:?Missing repository secret BEDS24_LUMA_REFRESH_TOKEN}"
+      - name: Run bounded GET-only Beds24 diagnostic
+        run: python scripts/beds24_readonly_check.py
