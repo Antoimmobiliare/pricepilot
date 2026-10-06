@@ -38,9 +38,15 @@ the webhook URL is empty and preserves queued Telegram updates. Also keep
 `PRICEPILOT_AUTO_REGISTER_TELEGRAM_WEBHOOK=0` on Render so a later restart does
 not recreate the conflict.
 
-The scheduled workflow runs at minutes 2, 7, 12, ... 57 of every hour. Each
+The scheduled workflow runs at minutes 3, 8, 13, ... 58 of every hour. Each
 invocation processes at most 50 updates and terminates. GitHub concurrency is
 configured with `cancel-in-progress: false`.
+
+The normal cycle persists the overview message ID and delivers its first
+actionable decision with the existing approval sender. Reviewing a delivered
+decision does not resend it. An individual delivery failure is retriable and
+must not be reported as a successful review or consume the polling cursor.
+GitHub schedules are best effort; a manual run is not evidence of cron delivery.
 
 ## Cursor and failure semantics
 

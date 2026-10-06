@@ -767,7 +767,8 @@ class TelegramCalendarWorkflowTests(unittest.TestCase):
                  'mode': 'approval', 'calendar_status': 'pending_approval',
                  'log_id': i+1, 'breakdown': {}} for i in range(90)]
         with patch.object(telegram_bot, 'is_configured', return_value=True), \
-             patch.object(telegram_bot, '_api_call', return_value={'ok': True}) as send, \
+             patch.object(telegram_bot, '_api_call', return_value={'ok': True, 'result': {'message_id': 9}}) as send, \
+             patch.object(telegram_bot, 'send_existing_pending_approval', return_value={'ok': True, 'message_id': '10'}) as deliver, \
              patch('pricepilot.core.database.get_property', return_value={'id': 7, 'account_id': 3}), \
              patch('pricepilot.core.database.get_telegram_link_by_property', return_value={'chat_id': 44}), \
              patch('pricepilot.core.database.get_notification_preferences', return_value={'telegram_enabled': 1, 'approval_alerts': 1}), \
@@ -775,6 +776,7 @@ class TelegramCalendarWorkflowTests(unittest.TestCase):
             outcome = telegram_bot.send_cycle_digest(3, rows)
         self.assertEqual(outcome['sent'], 1)
         self.assertEqual(send.call_count, 1)
+        deliver.assert_called_once_with(1, 3)
         payload = send.call_args.args[1]
         self.assertIn('90 proposte', payload['text'])
         self.assertEqual(payload['reply_markup']['inline_keyboard'][0][0]['callback_data'], 'review_1')

@@ -629,12 +629,20 @@ def send_cycle_digest(account_id: int, results: list) -> dict:
         if pending:
             payload['reply_markup'] = {'inline_keyboard': [[{'text': 'Esamina le proposte', 'callback_data': f"review_{pending[0]['log_id']}"}]]}
         response = _api_call('sendMessage', payload)
-        ok = bool(response.get('ok'))
+        message_id = (response.get('result') or {}).get('message_id')
+        ok = bool(response.get('ok') and message_id)
         sent += int(ok)
         failed += int(not ok)
         record_notification_log(event_type='pricing_cycle_digest', status='sent' if ok else 'failed',
             account_id=account_id, property_id=property_id, recipient=str(link['chat_id']),
+            message_id=str(message_id or ''),
             payload={'decision_ids': [r['log_id'] for r in rows]}, error='' if ok else 'Telegram delivery not confirmed')
+        # Deliver the first actionable night through the existing approval sender.
+        # The overview is not itself an approval request.
+        if ok and pending:
+            delivery = send_existing_pending_approval(pending[0]['log_id'], account_id)
+            if not delivery.get('ok'):
+                failed += 1
     return {'sent': sent, 'failed': failed}
 
 
@@ -656,6 +664,8 @@ def _review_pending(log_id, chat_id):
     if (not current or current.get('decision_log_id') != log_id
             or current.get('status') != 'pending_approval'):
         return False
+    if row.get('tg_message_id'):
+        return True
     candidates = get_decision_log(limit=1000, property_id=context['property_id'], account_id=context['account_id'])
     remaining = []
     for candidate in candidates:
@@ -669,10 +679,12 @@ def _review_pending(log_id, chat_id):
     remaining.sort(key=lambda c: c['date'])
     from pricepilot.engine.decision_engine import _scoped_property
     prop = _scoped_property(context['property_id'], context['account_id']) or {}
-    send_approval_request(log_id, prop.get('name', ''), row['old_price'], row['new_price'], row.get('occupancy'),
+    result = send_approval_request(log_id, prop.get('name', ''), row['old_price'], row['new_price'], row.get('occupancy'),
                           row.get('market_avg'), '', chat_id, _display_reason(row.get('notes')), row['date'],
                           remaining[0]['id'] if remaining else None,
                           _decision_factors(row.get('factors')))
+    if not result.get('ok') or not (result.get('result') or {}).get('message_id'):
+        raise RuntimeError('Telegram non ha confermato la consegna della proposta individuale.')
     return True
 
 
