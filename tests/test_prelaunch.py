@@ -229,6 +229,36 @@ class Beds24Tests(unittest.TestCase):
             self.client(lambda req:httpx.Response(401,text='private-token-sensitive-body')).current_day(self.mapping,DAY)
         self.assertNotIn('private-token',str(ctx.exception))
 
+    def test_read_and_write_use_the_same_configured_token_header(self):
+        seen = []
+        def handle(req):
+            seen.append((req.method, req.headers.get('token')))
+            if req.method == 'POST':
+                self.current = json.loads(req.content)[0]['calendar'][0]['price1']
+                return httpx.Response(201, json=[{'success': True}])
+            return httpx.Response(200, json=self.response())
+        self.client(handle).set_price(self.mapping, DAY, 110)
+        self.assertEqual(seen[0][0], 'GET')
+        self.assertEqual(seen[1][0], 'POST')
+        self.assertEqual(seen[0][1], 'TEST-NOT-A-REAL-TOKEN')
+        self.assertEqual(seen[1][1], seen[0][1])
+
+    def test_writer_401_is_failed_and_does_not_report_applied(self):
+        mapping = {**self.mapping, 'account_id': 1, 'property_id': 2,
+                   'provider': 'beds24', 'enabled': True, 'currency': 'EUR',
+                   'token_env': 'BEDS24_TEST_TOKEN'}
+        with patch.dict(os.environ, {'PRICEPILOT_ALLOW_CHANNEL_WRITES': '1',
+                                     'BEDS24_TEST_TOKEN': 'configured-token'}), \
+             patch('pricepilot.integrations.beds24.load_mapping', return_value=mapping), \
+             patch('pricepilot.integrations.beds24.Beds24Client') as client_cls:
+            client_cls.return_value.set_price.side_effect = Beds24Error('Beds24 HTTP 401; nessuna risposta riservata esposta.')
+            result = Beds24ChannelProvider().update_price(
+                prop={'id': 2, 'account_id': 1}, new_price=110, target_date=DAY)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.is_real)
+        self.assertIn('HTTP 401', result.error)
+        client_cls.assert_called_once_with(token='configured-token', refresh_token='')
+
     def test_no_credentials_no_network(self):
         c=Beds24Client(transport=httpx.MockTransport(lambda req:self.fail('Unexpected network')))
         self.addCleanup(c.close)
