@@ -7,11 +7,21 @@ import time
 import logging
 from datetime import date, datetime, timedelta
 from typing import Callable, Dict, Optional
-from pricepilot.core.data_quality import calendar_pricing_enabled
+from pricepilot.core.data_quality import DataUnavailable, calendar_pricing_enabled
 from pricepilot.engine.calendar_pricing import pricing_today
 from types import SimpleNamespace
 
 logger = logging.getLogger("pricepilot.scheduler")
+
+
+def _is_checkin_passed(exc: Exception) -> bool:
+    """Recognize only the deliberate no-proposal check-in guard.
+
+    Other ``DataUnavailable`` failures remain errors so the scheduler stays
+    fail-closed and visible when an actual data source is broken.
+    """
+    return (isinstance(exc, DataUnavailable)
+            and str(exc) == "Check-in già trascorso: nessuna proposta ordinaria consentita.")
 
 
 def _checkpoint(stage: str, *, run_id: int, account_id: int, property_id=None, target_date=None, **details) -> None:
@@ -276,6 +286,16 @@ def run_pricing_cycle(
                         "event_type": result.get("event_type", "none"),
                     })
                 except Exception as exc:
+                    if _is_checkin_passed(exc):
+                        logger.info("Data saltata property_id=%s: check-in gia trascorso", prop.get("id"))
+                        property_results.append({
+                            "date": d.isoformat(),
+                            "property_id": prop.get("id"),
+                            "property_name": prop.get("name", ""),
+                            "status": "skipped_checkin_passed",
+                            "error": str(exc),
+                        })
+                        continue
                     logger.error("Errore ciclo property_id=%s: %s", prop.get("id"), exc, exc_info=True)
                     err = {
                         "date": d.isoformat(),

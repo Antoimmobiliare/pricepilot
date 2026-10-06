@@ -133,7 +133,7 @@ class CalendarRuleTests(unittest.TestCase):
         self.assertEqual(context['pickup_7d_nights'], 4)
         self.assertTrue(context['metrics_complete'])
 
-    def test_rejected_proposal_is_reconsidered_after_material_context_change(self):
+    def test_rejected_proposal_is_not_reused(self):
         prior = {'policy_fingerprint': 'x', 'current_price_source': 'beds24_observation',
                  'reference_price': 100, 'occupancy_multiplier': .9,
                  'pacing_multiplier': 1, 'pickup_7d_nights': 0,
@@ -142,9 +142,29 @@ class CalendarRuleTests(unittest.TestCase):
                  'effective_multiplier': .9, 'manual_actions': []}
         row = {'old_price': 100, 'new_price': 90, 'mode': 'approval',
                'decision': 'PENDING_APPROVAL [REJECTED]', 'factors': json.dumps(prior)}
-        self.assertTrue(engine._reuse_proposal(row, 100, 90, prior, 'approval'))
-        changed = {**prior, 'lead_time_days': 2}
-        self.assertFalse(engine._reuse_proposal(row, 100, 90, changed, 'approval'))
+        self.assertFalse(engine._reuse_proposal(row, 100, 90, prior, 'approval'))
+
+    def test_only_valid_dedup_states_are_reused(self):
+        prior = {'policy_fingerprint': 'x', 'current_price_source': 'beds24_observation',
+                 'reference_price': 100, 'occupancy_multiplier': .9,
+                 'pacing_multiplier': 1, 'pickup_7d_nights': 0,
+                 'weekend_multiplier': 1, 'lead_time_days': 3,
+                 'lead_time_band': 'WATCH', 'checkin_datetime': '2026-10-10T15:00:00+02:00',
+                 'timezone': 'Europe/Rome', 'gap_multiplier': 1, 'gap_nights': None,
+                 'effective_multiplier': .9, 'manual_actions': []}
+
+        def row(state, **extra):
+            return {'old_price': 100, 'new_price': 90, 'mode': 'approval',
+                    'decision': state, 'factors': json.dumps(prior),
+                    'timestamp': datetime.now(ZoneInfo('UTC')).isoformat(), **extra}
+
+        self.assertTrue(engine._reuse_proposal(row('PENDING_APPROVAL'), 100, 90, prior, 'approval'))
+        self.assertTrue(engine._reuse_proposal(row('UNCHANGED: tariffa gia allineata'), 100, 90, prior, 'approval'))
+        self.assertFalse(engine._reuse_proposal(row('PENDING_APPROVAL [APPROVED_SYNC_FAILED]'), 100, 90, prior, 'approval'))
+        self.assertFalse(engine._reuse_proposal(row('PENDING_APPROVAL [REJECTED]'), 100, 90, prior, 'approval'))
+        self.assertFalse(engine._reuse_proposal(row('PENDING_APPROVAL', applied=1), 100, 90, prior, 'approval'))
+        stale = datetime.now(ZoneInfo('UTC')) - timedelta(hours=7)
+        self.assertFalse(engine._reuse_proposal(row('PENDING_APPROVAL', timestamp=stale.isoformat()), 100, 90, prior, 'approval'))
 
     def test_date_reference_and_explicit_weekend_rule(self):
         own = policy()
@@ -542,7 +562,7 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.telegram.assert_not_called()
         self.channel.assert_not_called()
 
-    def test_identical_pending_and_rejected_proposals_are_not_resent(self):
+    def test_identical_pending_is_deduplicated_but_rejected_is_recalculated(self):
         first = self.run_decision()
         second = self.run_decision()
         self.assertTrue(second['deduplicated'])
@@ -550,9 +570,9 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.assertEqual(self.telegram.call_count, 1)
         db.mark_decision_rejected(first['log_id'], self.account_id)
         third = self.run_decision()
-        self.assertTrue(third['deduplicated'])
-        self.assertEqual(third['log_id'], first['log_id'])
-        self.assertEqual(self.telegram.call_count, 1)
+        self.assertFalse(third.get('deduplicated', False))
+        self.assertNotEqual(third['log_id'], first['log_id'])
+        self.assertEqual(self.telegram.call_count, 2)
 
     def test_changed_price_source_blocks_approval_even_when_amount_matches(self):
         result = self.run_decision()

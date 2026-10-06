@@ -53,10 +53,17 @@ SYNC_MODES = {
 
 
 def _reuse_proposal(row, old_price, new_price, factors, mode):
-    """A declined identical proposal stays declined; uncertain sends need reconciliation."""
+    """Reuse only still-valid dedup states; terminal outcomes need recalculation."""
     state = str(row.get('decision') or '')
-    if '[APPLYING]' in state or '[APPROVED_SYNC_FAILED]' in state:
-        return True
+    # Approval outcomes are terminal for deduplication.  In particular, a
+    # failed channel sync must never be turned back into an apparently fresh
+    # approval opportunity: a later proposal requires a new calculation,
+    # freshness window and human approval.
+    applied = row.get('applied')
+    is_applied = applied is True or applied == 1 or str(applied).lower() == 'true'
+    if is_applied or any(tag in state for tag in (
+            '[APPLYING]', '[REJECTED]', '[APPROVED_')):
+        return False
     try:
         previous = json.loads(row.get('factors') or '{}')
         context_keys = ('policy_fingerprint', 'current_price_source', 'reference_price',
@@ -72,7 +79,7 @@ def _reuse_proposal(row, old_price, new_price, factors, mode):
                 and previous_context == current_context)
         if not same:
             return False
-        if '[REJECTED]' in state or state.startswith(('UNCHANGED', 'ADVISORY')) or '[APPROVED_PENDING_MANUAL_SYNC]' in state:
+        if state.startswith(('UNCHANGED', 'ADVISORY')):
             return True
         stamp = datetime.fromisoformat(str(row['timestamp']).replace('Z', '+00:00'))
         stamp = stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp

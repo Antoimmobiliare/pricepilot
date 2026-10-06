@@ -336,6 +336,43 @@ class SchedulerHorizonTests(unittest.TestCase):
         self.assertEqual(len(result['errors']),3)
         self.assertEqual(result['errors'][1]['date'],(DAY+timedelta(days=1)).isoformat())
 
+    def test_checkin_passed_is_skipped_without_partial_error(self):
+        from contextlib import ExitStack
+        from pricepilot.core.scheduler import run_pricing_cycle
+        from pricepilot.providers import registry
+        from pricepilot.core import database
+
+        provider = Mock(name='fixture_inventory')
+        provider.name = 'test_inventory'
+        provider.estimate.return_value = OccupancyResult(.5, 'test', {'target_state': 'open'})
+        finished = Mock(return_value={'id': 1, 'status': 'success'})
+
+        def decision(**kwargs):
+            if kwargs['target_date'] == DAY:
+                raise DataUnavailable('Check-in già trascorso: nessuna proposta ordinaria consentita.')
+            return {'mode': 'advisory'}
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(database, 'get_account', return_value={'plan': 'free', 'billing_status': 'dev'}))
+            stack.enter_context(patch.object(database, 'get_properties', return_value=[{'id': 1, 'account_id': 1}]))
+            stack.enter_context(patch.object(database, 'try_start_operation_run', return_value=(1, None)))
+            stack.enter_context(patch.object(database, 'finish_operation_run', finished))
+            stack.enter_context(patch.object(database, 'record_audit_event'))
+            stack.enter_context(patch.object(registry, 'get_occupancy_provider', return_value=provider))
+            stack.enter_context(patch('pricepilot.engine.decision_engine.process_decision', side_effect=decision))
+            stack.enter_context(patch('pricepilot.services.telegram_bot.send_cycle_digest', return_value={'sent': 0, 'failed': 0}))
+            result = run_pricing_cycle(account_id=1, target_date=DAY, horizon_days=2)
+
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(finished.call_args.kwargs['status'], 'success')
+        property_results = finished.call_args.kwargs['summary']['property_results']
+        self.assertEqual(property_results[0]['status'], 'skipped_checkin_passed')
+        self.assertEqual(property_results[1]['status'], 'ok')
+        self.assertEqual(result['run']['status'], 'success')
+        self.assertEqual(result['run']['id'], 1)
+        self.assertEqual(result['results'], [{'mode': 'advisory'}])
+        self.assertEqual(result['errors'], [])
+
     def test_cycle_deadline_finishes_run_when_lock_path_stalls(self):
         from pricepilot.core import database, scheduler
         from pricepilot.core.scheduler import run_pricing_cycle
