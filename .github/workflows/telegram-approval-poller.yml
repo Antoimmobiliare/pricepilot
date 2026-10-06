@@ -22,6 +22,10 @@ jobs:
       PRICEPILOT_ENV: production
       PRICEPILOT_DATABASE_BACKEND: supabase
       PRICEPILOT_OPERATIONAL_MODE: approval
+      # Match the production pricing runtime: approval revalidation must read
+      # the authoritative Beds24-backed inventory persisted in Supabase.
+      PRICEPILOT_OCCUPANCY_PROVIDER: observed_inventory
+      PRICEPILOT_CHANNEL_PROVIDER: beds24
       PRICEPILOT_ALLOW_CHANNEL_WRITES: ${{ vars.PRICEPILOT_ALLOW_CHANNEL_WRITES || '0' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
