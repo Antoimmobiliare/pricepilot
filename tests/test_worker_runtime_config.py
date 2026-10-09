@@ -1,5 +1,5 @@
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
@@ -26,6 +26,9 @@ class WorkerRuntimeConfigTests(TestCase):
 
     def test_observed_inventory_reads_persisted_rows_and_fails_closed_when_incomplete(self):
         start = date(2026, 10, 12)
+        provider = ObservedInventoryProvider(
+            clock=lambda: datetime(2026, 10, 6, 18, 0, tzinfo=timezone.utc),
+        )
         rows = [
             {
                 "account_id": 4,
@@ -38,7 +41,7 @@ class WorkerRuntimeConfigTests(TestCase):
             for offset in range(30)
         ]
         with patch("pricepilot.services.operational_store.get_inventory_rows", return_value=rows):
-            result = ObservedInventoryProvider().estimate(
+            result = provider.estimate(
                 property_id=11, target_date=start, account_id=4,
             )
         self.assertEqual(result.source, "observed_inventory")
@@ -48,7 +51,7 @@ class WorkerRuntimeConfigTests(TestCase):
 
         with patch("pricepilot.services.operational_store.get_inventory_rows", return_value=rows[:-1]):
             with self.assertRaisesRegex(DataUnavailable, "Servono 30 giorni"):
-                ObservedInventoryProvider().estimate(
+                provider.estimate(
                     property_id=11, target_date=start, account_id=4,
                 )
 
