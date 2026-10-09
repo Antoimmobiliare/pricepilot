@@ -19,7 +19,7 @@ jobs:
     # Il dispatch manuale continua a funzionare per il collaudo controllato.
     if: github.event_name == 'workflow_dispatch' || vars.PRICEPILOT_SCHEDULER_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Trigger the PricePilot API
         env:
@@ -34,7 +34,7 @@ jobs:
           # A timeout can occur after price writes. Do not replay the POST automatically.
           response_file="${RUNNER_TEMP}/pricepilot-cycle-response.json"
           curl --fail --show-error --silent \
-            --connect-timeout 20 --max-time 240 \
+            --connect-timeout 20 --max-time 720 \
             -X POST "${PRICEPILOT_API_BASE_URL%/}/internal/scheduled-pricing-cycle" \
             -H "X-PricePilot-Scheduler-Key: ${PRICEPILOT_SCHEDULER_KEY}" \
             -H "Accept: application/json" \

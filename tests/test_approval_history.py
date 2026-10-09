@@ -19,6 +19,18 @@ class ApprovalHistoryTests(unittest.TestCase):
                'raw': {'confirmation_scope': 'beds24_calendar', 'date': '2026-10-11',
                        'price_slot': 'price1', 'price': '84.38'}}
 
+    def test_cloud_workflow_waits_for_default_horizon_without_retry(self):
+        import re
+        from pricepilot.core.scheduler import _cycle_timeout_seconds
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root/'.github/workflows/pricing-scheduler.yml').read_text(encoding='utf-8')
+        http_limit = int(re.search(r'--max-time (\d+)', workflow).group(1))
+        job_limit = int(re.search(r'timeout-minutes: (\d+)', workflow).group(1))*60
+        self.assertGreater(http_limit, _cycle_timeout_seconds(90)+60)
+        self.assertGreater(job_limit, http_limit+60)
+        self.assertNotIn('--retry', workflow)
+        self.assertIn("vars.PRICEPILOT_SCHEDULER_ENABLED == 'true'", workflow)
+
     def test_reconciliation_idempotent_without_writer(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(CONFIG, db_path=str(Path(temp)/'history.db')):
             first = history.record_confirmed_approval(self.prop, self.row, self.channel, '2026-10-09T12:13:59+00:00')
