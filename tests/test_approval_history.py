@@ -24,11 +24,12 @@ class ApprovalHistoryTests(unittest.TestCase):
         from pricepilot.core.scheduler import _cycle_timeout_seconds
         root = Path(__file__).resolve().parents[1]
         workflow = (root/'.github/workflows/pricing-scheduler.yml').read_text(encoding='utf-8')
-        http_limit = int(re.search(r'--max-time (\d+)', workflow).group(1))
         job_limit = int(re.search(r'timeout-minutes: (\d+)', workflow).group(1))*60
-        self.assertGreater(http_limit, _cycle_timeout_seconds(90)+60)
-        self.assertGreater(job_limit, http_limit+60)
+        self.assertGreater(job_limit, _cycle_timeout_seconds(90)+120)
         self.assertNotIn('--retry', workflow)
+        self.assertNotIn('curl ', workflow)
+        self.assertIn("run_cloud_pricing_cycle(source='github_actions')", workflow)
+        self.assertIn("PRICEPILOT_ALLOW_CHANNEL_WRITES: '0'", workflow)
         self.assertIn("vars.PRICEPILOT_SCHEDULER_ENABLED == 'true'", workflow)
 
     def test_reconciliation_idempotent_without_writer(self):

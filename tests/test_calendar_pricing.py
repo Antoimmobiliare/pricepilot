@@ -93,11 +93,14 @@ class CalendarRuleTests(unittest.TestCase):
         own['pacing_rule'] = {'enabled': True, 'through_days': 60,
             'low_pickup_7d_nights': 1, 'high_pickup_7d_nights': 5,
             'low_multiplier': .95, 'high_multiplier': 1.08}
-        target = date.today() + timedelta(days=(4-date.today().weekday()) % 7)
+        # Test the signal conflict on a future Friday, independent of whether
+        # the suite happens to run after today's check-in time.
+        target = date(2030, 1, 4)
         result = calculate_calendar_price(
             current_price=117, occupancy=.2, target_date=target, policy=own,
             min_price=50, max_price=200, max_change_pct=.2,
             inventory_context={'metrics_complete': True, 'pickup_7d_nights': 7},
+            now=datetime(2030, 1, 3, 12, tzinfo=ZoneInfo('Europe/Rome')),
         )
         self.assertEqual(result['recommended_price'], 117)
         self.assertTrue(result['breakdown']['signal_conflict'])

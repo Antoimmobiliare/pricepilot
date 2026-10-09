@@ -30,6 +30,20 @@ class ProductionScopeTests(unittest.TestCase):
     def test_only_luma_is_resolved_without_reading_secure_apt(self):
         self.assertEqual(self.resolve(), {4: [self.prop]})
 
+    def test_production_job_runs_scoped_engine_with_read_only_runtime(self):
+        from pathlib import Path
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/pricing-scheduler.yml').read_text(encoding='utf-8')
+        for required in ('PRICEPILOT_DATABASE_BACKEND: supabase',
+                         'PRICEPILOT_OCCUPANCY_PROVIDER: observed_inventory',
+                         'PRICEPILOT_CHANNEL_PROVIDER: beds24',
+                         'PRICEPILOT_OPERATIONAL_MODE: approval',
+                         "PRICEPILOT_ALLOW_CHANNEL_WRITES: '0'",
+                         'secrets.BEDS24_LUMA_REFRESH_TOKEN',
+                         "run_cloud_pricing_cycle(source='github_actions')"):
+            self.assertIn(required, workflow)
+        self.assertNotIn('process_telegram_update', workflow)
+        self.assertNotIn('set_price(', workflow)
+
     def test_mapping_or_account_mismatch_fails_closed(self):
         for mapping in (dict(self.mapping, room_id=1), dict(self.mapping, beds24_property_id=1),
                         dict(self.mapping, enabled=False), dict(self.mapping, account_id=2)):
