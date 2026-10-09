@@ -1061,6 +1061,20 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
         status=status,
         details={"applied": applied, "channel_manager": cm_result},
     )
+    history_error = None
+    if is_real and cm_result.get('platform') == 'beds24':
+        try:
+            from pricepilot.services.approval_history import record_confirmed_approval
+            record_confirmed_approval(prop, {**row, 'id': log_id}, cm_result,
+                                      datetime.now(timezone.utc).isoformat())
+        except Exception as exc:
+            # The confirmed write must never be retried because history persistence failed.
+            history_error = type(exc).__name__
+            logger.error('Decisione %s applicata: storico da riconciliare (%s).', log_id, history_error)
+            record_audit_event(action='approval_history_pending', entity_type='decision_log',
+                               entity_id=log_id, account_id=row_account_id, property_id=property_id,
+                               source='approval', status='reconciliation_required',
+                               details={'error_type': history_error, 'channel_write_retry_allowed': False})
     logger.info(
         "Decisione %s approvata: status=%s, applied=%s, channel=%s/%s",
         log_id,
@@ -1075,4 +1089,5 @@ def approve_decision(log_id: int, account_id: Optional[int] = None) -> Dict:
         "status": status,
         "message": message,
         "channel_manager": cm_result,
+        "history_error": history_error,
     }

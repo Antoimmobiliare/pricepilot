@@ -2426,11 +2426,26 @@ def record_price_update(prop: Dict, result: Dict, target_date: date) -> int:
                    error TEXT, applied_at TEXT, is_stub INTEGER NOT NULL DEFAULT 0
                )"""
         )
+        columns = {r[1] for r in conn.execute('PRAGMA table_info(price_updates)')}
+        if 'approval_key' not in columns:
+            conn.execute('ALTER TABLE price_updates ADD COLUMN approval_key TEXT')
+        conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_price_updates_approval_key ON price_updates(approval_key)')
+        approval_key = (f"{int(prop.get('account_id') or 1)}:{int(result['decision_log_id'])}"
+                        if result.get('decision_log_id') is not None else None)
+        if approval_key:
+            previous = conn.execute('SELECT * FROM price_updates WHERE approval_key=?', (approval_key,)).fetchone()
+            if previous:
+                if (previous['property_id'] != int(prop['id']) or previous['target_date'] != target_date.isoformat()
+                        or float(previous['new_price']) != float(result['new_price'])
+                        or previous['listing_id'] != str(result.get('listing_id') or prop.get('listing_id') or '')
+                        or bool(previous['ok']) != bool(result.get('ok'))):
+                    raise ValueError('Confirmed approval history conflict.')
+                return int(previous['id'])
         cursor = conn.execute(
             """INSERT INTO price_updates
                (account_id, property_id, platform, listing_id, target_date, new_price,
-                ok, error, applied_at, is_stub)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                ok, error, applied_at, is_stub, approval_key)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 int(prop.get("account_id") or 1),
                 int(prop["id"]),
@@ -2442,6 +2457,7 @@ def record_price_update(prop: Dict, result: Dict, target_date: date) -> int:
                 str(result.get("error") or ""),
                 result.get("applied_at") or now,
                 int(bool((result.get("raw") or {}).get("stub", False))),
+                approval_key,
             ),
         )
     return int(cursor.lastrowid)

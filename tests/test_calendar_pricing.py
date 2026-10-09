@@ -605,6 +605,36 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.assertFalse(outcome['applied'])
         self.assertEqual(outcome['status'], 'approved_sync_failed')
 
+    def test_confirmed_beds24_approval_records_history_once(self):
+        result = self.run_decision()
+        price = result['recommended_price']
+        self.channel.return_value = {'ok': True, 'is_real': True, 'platform': 'beds24',
+            'listing_id': '736801', 'new_price': price, 'raw': {'confirmation_scope': 'beds24_calendar',
+            'date': self.day.isoformat(), 'price_slot': 'price1', 'price': str(price)}}
+        self.assertTrue(engine.approve_decision(result['log_id'], self.account_id)['applied'])
+        self.assertEqual(engine.approve_decision(result['log_id'], self.account_id)['status'], 'already_applied')
+        rows = db.get_price_updates([self.prop['id']])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['new_price'], price)
+        self.channel.assert_called_once()
+
+    def test_history_failure_never_retries_confirmed_write(self):
+        result = self.run_decision()
+        self.channel.return_value = {'ok': True, 'is_real': True, 'platform': 'beds24'}
+        with patch('pricepilot.services.approval_history.record_confirmed_approval', side_effect=OSError('storage unavailable')):
+            outcome = engine.approve_decision(result['log_id'], self.account_id)
+        self.assertTrue(outcome['applied'])
+        self.assertEqual(outcome['history_error'], 'OSError')
+        self.assertEqual(engine.approve_decision(result['log_id'], self.account_id)['status'], 'already_applied')
+        self.channel.assert_called_once()
+
+    def test_failed_write_has_no_confirmed_history(self):
+        result = self.run_decision()
+        self.channel.return_value = {'ok': False, 'is_real': True, 'attempted': True, 'platform': 'beds24', 'error': '401'}
+        with patch('pricepilot.services.approval_history.record_confirmed_approval') as history:
+            self.assertFalse(engine.approve_decision(result['log_id'], self.account_id)['applied'])
+        history.assert_not_called()
+
     def test_write_gate_zero_keeps_approval_pending_without_claim_or_write(self):
         result = self.run_decision()
         with patch.dict(os.environ, {'PRICEPILOT_ALLOW_CHANNEL_WRITES': '0'}):

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from uuid import NAMESPACE_URL, uuid5
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -1299,7 +1300,7 @@ def delete_property_integration(integration_id: int) -> None:
 
 
 def record_price_update(prop: Dict, result: Dict, target_date: date) -> int:
-    row = _insert("price_updates", {
+    payload = {
         "account_id": int(prop.get("account_id") or 1), "property_local_id": int(prop["id"]),
         "platform": str(result.get("platform") or prop.get("platform") or ""),
         "listing_id": str(result.get("listing_id") or prop.get("listing_id") or ""),
@@ -1307,7 +1308,23 @@ def record_price_update(prop: Dict, result: Dict, target_date: date) -> int:
         "ok": bool(result.get("ok")), "error": str(result.get("error") or ""),
         "applied_at": result.get("applied_at") or datetime.utcnow().isoformat(),
         "is_stub": bool((result.get("raw") or {}).get("stub", False)),
-    })
+    }
+    if result.get('decision_log_id') is not None:
+        # Existing UUID primary key supplies atomic idempotency without a schema change.
+        payload['id'] = str(uuid5(NAMESPACE_URL,
+            f"pricepilot:approval:{payload['account_id']}:{int(result['decision_log_id'])}"))
+        payload = _scoped_payload('price_updates', payload)
+        rows = _data(_client().table('price_updates').upsert(
+            payload, on_conflict='id', ignore_duplicates=True).execute())
+        row = _one(rows) or _one(_select('price_updates', filters={
+            'id': payload['id'], 'account_id': payload['account_id']}, limit=1))
+        if not row or any(row.get(k) != payload[k] for k in
+                          ('account_id', 'property_local_id', 'target_date', 'listing_id', 'ok')):
+            raise CloudDatabaseUnavailable('Confirmed approval history conflict or missing record.')
+        if float(row['new_price']) != float(payload['new_price']):
+            raise CloudDatabaseUnavailable('Confirmed approval history price conflict.')
+    else:
+        row = _insert('price_updates', payload)
     return _id_from_row(row, "price_updates")
 
 

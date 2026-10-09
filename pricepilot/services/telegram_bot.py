@@ -131,6 +131,10 @@ def _api_call(
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
+        if (method == 'answerCallbackQuery' and e.code == 400
+                and 'query is too old' in body.lower()):
+            logger.info('Telegram ACK scaduto; esito economico indipendente, aggiornamento messaggio ancora consentito.')
+            return {'ok': False, 'non_blocking': True, 'error_code': 'callback_ack_expired'}
         if e.code == 400 and "message is not modified" in body.lower():
             logger.info("Telegram edit ignorato: messaggio gia aggiornato.")
             return {"ok": True, "ignored": "message_not_modified", "description": body}
