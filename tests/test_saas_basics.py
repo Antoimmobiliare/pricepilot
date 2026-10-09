@@ -226,7 +226,9 @@ class PricePilotSaaSTestCase(unittest.TestCase):
         self._property(account_a, "Cloud Apt A")
         self._property(account_b, "Cloud Apt B")
 
-        with patch("pricepilot.core.scheduler.run_pricing_cycle", return_value={"run": {}, "results": [], "errors": []}) as run_cycle:
+        with patch("pricepilot.services.scheduler_scope.scheduled_properties", return_value={
+                account_a['id']: [{'id': 1, 'account_id': account_a['id']}],
+                account_b['id']: [{'id': 2, 'account_id': account_b['id']}]}), patch("pricepilot.core.scheduler.run_pricing_cycle", return_value={"run": {}, "results": [], "errors": []}) as run_cycle:
             result = run_cloud_pricing_cycle(source="unit_test_cloud")
 
         processed = {call.kwargs["account_id"] for call in run_cycle.call_args_list}

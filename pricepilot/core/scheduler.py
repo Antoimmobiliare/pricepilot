@@ -122,6 +122,7 @@ def run_pricing_cycle(
     interval_hours: float = 6,
     source: str = "scheduler",
     horizon_days: Optional[int] = None,
+    _scheduled_properties: Optional[list] = None,
 ) -> Dict:
     """
     Esegue un ciclo SaaS completo su tutte le proprieta dell'account.
@@ -190,7 +191,8 @@ def run_pricing_cycle(
         raise RuntimeError("Impossibile avviare il ciclo pricing.")
     cycle_deadline = time.monotonic() + cycle_timeout
     _checkpoint("run_started", run_id=run_id, account_id=account_id)
-    properties = get_properties(account_id=account_id)
+    properties = (_scheduled_properties if _scheduled_properties is not None
+                  else get_properties(account_id=account_id))
     results = []
     errors = []
     property_results = []
@@ -380,23 +382,21 @@ def run_cloud_pricing_cycle(
     source: str = "cloud_scheduler",
     horizon_days: Optional[int] = None,
 ) -> Dict:
-    """Esegue il ciclo su ogni account che possiede almeno una proprietà.
+    """Esegue il ciclo esclusivamente nel perimetro server autorizzato.
 
     Il job cloud chiama questa funzione una sola volta. Il blocco contro i
     doppioni resta per-account in ``run_pricing_cycle``: un errore su un
     tenant non interrompe gli altri e non può far partire due run paralleli
     sullo stesso portfolio.
     """
-    from pricepilot.core.database import get_properties
+    from pricepilot.services.scheduler_scope import scheduled_properties
 
-    account_ids = sorted({
-        int(prop.get("account_id") or 1)
-        for prop in get_properties()
-    })
+    # Resolve/validate the entire allowlist before any cycle/provider side effect.
+    scoped = scheduled_properties()
     results = []
     errors = []
 
-    for account_id in account_ids:
+    for account_id in sorted(scoped):
         try:
             result = run_pricing_cycle(
                 account_id=account_id,
@@ -404,6 +404,7 @@ def run_cloud_pricing_cycle(
                 interval_hours=interval_hours,
                 source=source,
                 horizon_days=horizon_days,
+                _scheduled_properties=scoped[account_id],
             )
             if result.get("errors"):
                 errors.append({"account_id": account_id, "error": "Ciclo incompleto", "details": result["errors"]})
@@ -437,4 +438,4 @@ def run_cloud_pricing_cycle(
 if __name__ == "__main__":
     os.environ.setdefault("PRICEPILOT_RUNTIME", "scheduler")
     logging.basicConfig(level=logging.INFO)
-    run_periodic(lambda: run_pricing_cycle(source="scheduler_cli"), hours=6)
+    run_periodic(lambda: run_cloud_pricing_cycle(source="scheduler_cli"), hours=6)

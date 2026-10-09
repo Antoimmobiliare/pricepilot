@@ -28,6 +28,7 @@ from pricepilot.core.config import CONFIG
 from pricepilot.core.database import init_db
 from pricepilot.core.scheduler import (
     run_periodic,
+    run_cloud_pricing_cycle,
     run_pricing_cycle as run_account_pricing_cycle,
 )
 
@@ -95,7 +96,7 @@ def main():
 
     if args.loop:
         hours = float(CONFIG.get("update_interval_hours", 6))
-        run_periodic(lambda: run_pricing_cycle(source="cli_loop"), hours=hours, once=False)
+        run_periodic(lambda: run_cloud_pricing_cycle(source="cli_loop"), hours=hours, once=False)
         return
 
     run_pricing_cycle()

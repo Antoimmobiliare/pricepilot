@@ -397,7 +397,7 @@ class SchedulerHorizonTests(unittest.TestCase):
 
     def test_cloud_reports_child_failure(self):
         from pricepilot.core.scheduler import run_cloud_pricing_cycle
-        with patch('pricepilot.core.database.get_properties',return_value=[{'account_id':1}]), patch('pricepilot.core.scheduler.run_pricing_cycle',return_value={'errors':[{'error':'missing'}]}):
+        with patch('pricepilot.services.scheduler_scope.scheduled_properties',return_value={1:[{'id':1,'account_id':1}]}), patch('pricepilot.core.scheduler.run_pricing_cycle',return_value={'errors':[{'error':'missing'}]}):
             result=run_cloud_pricing_cycle(target_date=DAY)
         self.assertFalse(result['ok'])
         self.assertEqual(result['accounts_failed'],1)
