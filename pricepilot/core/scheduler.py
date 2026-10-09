@@ -318,6 +318,8 @@ def run_pricing_cycle(
         status = "success" if not errors else ("partial_error" if results else "error")
         summary = {
             "date": start_date.isoformat(),
+            "property_ids": [int(prop['id']) for prop in properties],
+            "channel_writes_enabled": os.getenv('PRICEPILOT_ALLOW_CHANNEL_WRITES', '0') == '1',
             "horizon_days": horizon,
             "end_exclusive": (start_date + timedelta(days=horizon)).isoformat(),
             "properties": len(properties),
