@@ -1,0 +1,65 @@
+{
+  "enabled": true,
+  "gap_rule": {
+    "enabled": true,
+    "max_nights": 3,
+    "multiplier": 0.96,
+    "through_days": 14
+  },
+  "account_id": 4,
+  "break_even": 79.0,
+  "pacing_rule": {
+    "enabled": true,
+    "through_days": 30,
+    "low_multiplier": 0.98,
+    "high_multiplier": 1.03,
+    "low_pickup_7d_nights": 1,
+    "high_pickup_7d_nights": 5
+  },
+  "property_id": 11,
+  "lead_time_bands": [
+    {
+      "through_days": 7,
+      "low_occupancy": 0.4,
+      "high_occupancy": 0.8,
+      "low_multiplier": 0.95,
+      "high_multiplier": 1.05
+    },
+    {
+      "through_days": 30,
+      "low_occupancy": 0.3,
+      "high_occupancy": 0.7,
+      "low_multiplier": 0.97,
+      "high_multiplier": 1.04
+    },
+    {
+      "through_days": 366,
+      "low_occupancy": 0.1,
+      "high_occupancy": 0.7,
+      "low_multiplier": 1.0,
+      "high_multiplier": 1.03
+    }
+  ],
+  "reference_price": 89.0,
+  "minimum_stay_rule": {
+    "enabled": true,
+    "through_days": 21,
+    "max_gap_nights": 2
+  },
+  "minimum_change_eur": 2.0,
+  "weekend_multiplier": 1.056,
+  "date_reference_prices": {},
+  "unsold_risk": {
+    "enabled": true,
+    "minimum_negative_signals": 2,
+    "max_amplification": 0.25,
+    "max_total_discount": 0.08,
+    "urgency_weights": {
+      "STANDARD": 0.0,
+      "WATCH": 0.15,
+      "LAST_MINUTE": 0.4,
+      "URGENT": 0.7,
+      "SAME_DAY": 1.0
+    }
+  }
+}
